@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f4f0">
+  <title>Archiv — Venice archiver</title>
+  <link rel="icon" href="/favicon.svg?v=0.7.15" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css?v=0.7.15">
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="icon-home" viewBox="0 0 24 24"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="icon-conversations" viewBox="0 0 24 24"><path d="M5 6.5h14M5 12h14M5 17.5h9"/></symbol>
+    <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.75" cy="10.75" r="6.25"/><path d="m15.5 15.5 4 4"/></symbol>
+    <symbol id="icon-archive" viewBox="0 0 24 24"><path d="M5 8.5h14v11H5zM4 4.5h16v4H4zM9 13h6"/></symbol>
+    <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></symbol>
+    <symbol id="icon-panel" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14.5 4v16"/></symbol>
+    <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+    <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="icon-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 4 3.5 20h17zM12 9v5m0 3v.1"/></symbol>
+    <symbol id="icon-file" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V21H6zM14 3.5V8h4"/></symbol>
+    <symbol id="icon-audio" viewBox="0 0 24 24"><path d="M9 18V6l9-2v12M6.5 20C4.6 20 3 18.9 3 17.5S4.6 15 6.5 15 10 16.1 10 17.5 8.4 20 6.5 20Zm8-2c-1.9 0-3.5-1.1-3.5-2.5s1.6-2.5 3.5-2.5 3.5 1.1 3.5 2.5-1.6 2.5-3.5 2.5Z"/></symbol>
+    <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol>
+    <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.1"/></symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3.5 7h6l2-2h9v14h-17z"/></symbol>
+    <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3.8 2.55 5.17 5.7.83-4.13 4.02.98 5.68L12 16.82 6.9 19.5l.98-5.68L3.75 9.8l5.7-.83z"/></symbol>
+    <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="icon-eye-off" viewBox="0 0 24 24"><path d="m3 3 18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a15 15 0 0 1-2.1 2.8M6.3 6.3C3.9 8 2.5 12 2.5 12s3.5 6 9.5 6c1.4 0 2.6-.3 3.7-.8M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+  </svg>
+  <a class="skip-link" href="#main">Skip to library content</a>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <button class="brand" type="button" data-go="home" aria-label="Open Archiv library"><span class="brand-mark">A</span><span class="brand-copy"><strong>Archiv</strong><small>Venice archiver</small></span></button>
+      <nav class="primary-nav" aria-label="Archive sections">
+        <button type="button" data-nav="home" class="nav-item active" aria-current="page" title="Library"><svg><use href="#icon-home"/></svg><span class="nav-label">Library</span></button>
+        <button type="button" data-nav="conversations" class="nav-item" title="Conversations"><svg><use href="#icon-conversations"/></svg><span class="nav-label">Conversations</span></button>
+        <button type="button" data-nav="media" class="nav-item" title="Media"><svg><use href="#icon-grid"/></svg><span class="nav-label">Media</span></button>
+        <button type="button" data-nav="search" class="nav-item" title="Search"><svg><use href="#icon-search"/></svg><span class="nav-label">Search</span></button>
+      </nav>
+      <nav class="utility-nav" aria-label="Archive management">
+        <button type="button" data-nav="archive" class="nav-item" title="Archive status"><svg><use href="#icon-archive"/></svg><span class="nav-label">Archive status</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sidebar-private"><div class="privacy-dot"></div><span>Library served locally</span></div>
+        <small id="buildLabel"></small>
+        <p>A community project by hiroP. Not endorsed by or affiliated with Venice.ai.</p>
+        <div class="legal-notice">© 2026 hiroP · <a href="/license" target="_blank" rel="noreferrer">AGPL v3</a> · no warranty · <a href="https://github.com/docherty/archiv" target="_blank" rel="noreferrer">source</a></div>
+      </div>
+    </aside>
+    <button class="nav-scrim" id="navScrim" type="button" aria-label="Close navigation" hidden></button>
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-btn mobile-menu" type="button" id="menuBtn" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><svg><use href="#icon-menu"/></svg></button>
+        <span class="context-title" id="contextTitle" hidden></span>
+        <form class="global-search" id="globalSearchForm" role="search"><button class="global-search-submit" type="submit" aria-label="Search archive"><svg><use href="#icon-search"/></svg></button><input id="globalSearchInput" type="search" placeholder="Search your archive…" autocomplete="off" aria-label="Search conversations, messages and media"><button class="search-mode-toggle" id="wholeWordToggle" type="button" aria-pressed="false" title="Match whole words"><span class="search-mode-glyph" aria-hidden="true">Ab</span><span class="search-mode-label">Whole words</span></button><kbd>⌘ K</kbd></form>
+        <div class="top-stats" id="topStats" aria-label="Archive totals" hidden></div>
+        <button class="sync-button" type="button" id="syncButton" aria-label="Open archive sync panel" aria-haspopup="dialog" aria-controls="syncDrawer" aria-expanded="false"><svg class="sync-icon"><use href="#icon-refresh"/></svg><span id="syncButtonLabel">Sync archive</span></button>
+      </header>
+      <main id="main" tabindex="-1"><div class="page-loading" role="status"><div class="spinner"></div><p>Opening your archive…</p></div></main>
+    </div>
+  </div>
+  <button class="drawer-scrim" id="drawerScrim" type="button" aria-label="Close update panel" hidden></button>
+  <aside class="sync-drawer" id="syncDrawer" role="dialog" aria-modal="true" aria-labelledby="syncTitle" aria-describedby="syncMessage" aria-hidden="true" tabindex="-1" inert>
+    <div class="drawer-head"><div><span class="eyebrow">Archive sync</span><h2 id="syncTitle">Sync archive</h2></div><button class="icon-btn" type="button" id="closeSync" aria-label="Close sync panel"><svg><use href="#icon-close"/></svg></button></div>
+    <div class="sync-state-icon" id="syncStateIcon"><svg><use href="#icon-refresh"/></svg></div><p class="sync-message" id="syncMessage" aria-live="polite">Ready. Select Fetch new content below to check Venice and save anything new.</p>
+    <div class="sync-result" id="syncResult" hidden></div>
+    <div class="phase-track" id="phaseTrack" aria-hidden="true"></div><div class="progress-bar" role="progressbar" aria-label="Archive update progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="syncProgress"></span></div>
+    <div class="sync-meta"><span id="syncElapsed"></span><span id="syncStatusLabel">Ready</span></div>
+    <details class="activity"><summary>Activity details</summary><div id="syncLog"></div></details>
+    <button class="primary wide" type="button" id="startSync">Fetch new content</button>
+  </aside>
+  <div class="modal-backdrop" id="modalBackdrop" hidden><section class="media-modal" id="mediaModal" role="dialog" aria-modal="true" aria-label="Media viewer" tabindex="-1"></section></div>
+  <div class="toast-region" id="toasts" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="/assets/app.js?v=0.7.15"></script>
+</body>
+</html>

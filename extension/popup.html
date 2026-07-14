@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://venice.ai; media-src 'self' data: blob: https://venice.ai; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>Venice Archive</title>
+  <style>
+    :root {
+      --canvas: #f5f4f0;
+      --panel: #fff;
+      --panel-soft: #f8f8f5;
+      --ink: #1d241f;
+      --muted: #667068;
+      --faint: #687269;
+      --line: #dde0d9;
+      --line-strong: #c7ccc4;
+      --green: #294f37;
+      --green-hover: #203f2b;
+      --green-soft: #e8f0e9;
+      --amber: #8d5d21;
+      --amber-soft: #fbf0de;
+      --red: #99453f;
+      --red-soft: #f8e9e7;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { width: 360px; min-height: 0; margin: 0; background: var(--canvas); color: var(--ink); font-size: 13px; -webkit-font-smoothing: antialiased; }
+    button, summary { font: inherit; }
+    button:focus-visible, summary:focus-visible { outline: 3px solid rgba(54, 104, 70, .25); outline-offset: 2px; }
+    .header { display: flex; align-items: center; gap: 10px; padding: 15px 16px 13px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.62); }
+    .header-icon { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; background: var(--green); color: #fff; font-family: Georgia, "Times New Roman", serif; font-size: 18px; }
+    .header-copy { min-width: 0; }
+    .header-title { font-size: 15px; font-weight: 700; letter-spacing: -.015em; }
+    .header-subtitle { margin-top: 1px; color: var(--muted); font-size: 10.5px; }
+    .header-badge { margin-left: auto; padding: 4px 7px; border: 1px solid #c9d9cc; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 10px; font-weight: 760; letter-spacing: .08em; }
+    .status-section { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .status-badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; font-size: 11px; font-weight: 680; }
+    .status-icon { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .status-badge.connected, .status-badge.synced { background: var(--green-soft); color: var(--green); }
+    .status-badge.disconnected { background: var(--red-soft); color: var(--red); }
+    .status-badge.warning { background: var(--amber-soft); color: var(--amber); }
+    .message { display: none; padding: 9px 16px; border-bottom: 1px solid var(--line); font-size: 11.5px; line-height: 1.45; }
+    .message.info, .message.success, .message.error, .message.warning { display: block; }
+    .message.info { background: #edf2f7; color: #40576d; }
+    .message.success { background: var(--green-soft); color: var(--green); }
+    .message.warning { background: var(--amber-soft); color: var(--amber); }
+    .message.error { background: var(--red-soft); color: var(--red); }
+    .stats-section { padding: 12px 16px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+    .stat-card { padding: 11px 7px; border-right: 1px solid var(--line); text-align: center; }
+    .stat-card:last-child { border-right: 0; }
+    .stat-value { font-size: 18px; font-weight: 720; font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+    .stat-label { margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+    .folder-section { padding: 1px 16px 13px; }
+    .section-label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 760; letter-spacing: .09em; text-transform: uppercase; }
+    .folder-info { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    .folder-icon { width: 25px; height: 25px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 7px; background: var(--green-soft); color: var(--green); }
+    .folder-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .folder-path { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .folder-status { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 10px; font-weight: 720; letter-spacing: .035em; text-transform: uppercase; }
+    .folder-status.not-set { background: var(--amber-soft); color: var(--amber); }
+    .actions-section { padding: 0 16px 14px; }
+    .action-group { display: grid; gap: 7px; }
+    .btn { min-height: 38px; display: flex; align-items: center; justify-content: center; padding: 0 13px; border: 1px solid transparent; border-radius: 9px; font-size: 12px; font-weight: 680; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .btn-primary { background: var(--green); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--green-hover); }
+    .btn-secondary, .btn-outline { border-color: var(--line-strong); background: var(--panel); color: var(--green); }
+    .btn-secondary:hover:not(:disabled), .btn-outline:hover:not(:disabled) { background: var(--green-soft); }
+    #selectFolderBtn, #restoreBtn { display: none; }
+    .technical { border-top: 1px solid var(--line); background: var(--panel); }
+    .technical > summary { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; list-style: none; color: var(--muted); font-size: 11.5px; font-weight: 650; cursor: pointer; }
+    .technical > summary::-webkit-details-marker { display: none; }
+    .technical > summary::after { content: "+"; font-size: 17px; font-weight: 400; }
+    .technical[open] > summary::after { content: "−"; }
+    .technical-body { padding: 0 16px 14px; }
+    .key-section { margin-bottom: 12px; }
+    .key-label, .section-title { color: var(--muted); font-size: 10px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+    .key-label { margin-bottom: 6px; }
+    .key-value { padding: 8px 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .key-fingerprint { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .key-fingerprint.success { color: var(--green); }
+    .key-fingerprint.warning { color: var(--red); }
+    .key-fingerprint.idle { color: var(--muted); }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+    .key-count-badge { padding: 3px 6px; border-radius: 999px; background: var(--panel-soft); color: var(--muted); font-size: 10px; }
+    .keys-list { display: grid; gap: 6px; }
+    .key-item { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); }
+    .key-item.active { border-color: #9fbaa6; background: var(--green-soft); }
+    .key-indicator { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }
+    .key-item.active .key-indicator { background: var(--green); }
+    .key-details { min-width: 0; flex: 1; }
+    .key-name { font-size: 10.5px; font-weight: 650; }
+    .key-meta { margin-top: 1px; overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .empty-keys { padding: 16px 8px; color: var(--muted); font-size: 11px; text-align: center; }
+    .footer { padding: 9px 16px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10.5px; text-align: center; }
+    .footer > span { display: block; }
+    .footer .legal { margin-top: 5px; font-size: 9px; line-height: 1.45; }
+    .footer a { color: inherit; text-underline-offset: 2px; }
+    .hidden { display: none !important; }
+    @media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-icon" aria-hidden="true">V</div>
+    <div class="header-copy"><div class="header-title">Venice Archive</div><div class="header-subtitle">Read-only local backup</div></div>
+    <span class="header-badge">LOCAL</span>
+  </header>
+
+  <section class="status-section" aria-label="Venice connection">
+    <div class="status-badge disconnected" id="statusBadge"><span class="status-icon"></span><span class="status-text">Checking Venice…</span></div>
+  </section>
+  <div class="message" id="messageBanner" role="status" aria-live="polite"></div>
+
+  <section class="stats-section" aria-label="Venice content summary">
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value" id="conversationCount">—</div><div class="stat-label">Conversations</div></div>
+      <div class="stat-card"><div class="stat-value" id="messageCount">—</div><div class="stat-label">Messages</div></div>
+    </div>
+  </section>
+
+  <section class="folder-section">
+    <span class="section-label">Archive destination</span>
+    <div class="folder-info"><span class="folder-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7.5h6l2 2h8v9.5H4z"/></svg></span><span class="folder-path" id="folderPath">Managed in archive manager</span><span class="folder-status not-set" id="folderStatus">Checking</span></div>
+    <button class="btn btn-secondary" id="selectFolderBtn" type="button">Open archive manager</button>
+  </section>
+
+  <section class="actions-section">
+    <div class="action-group">
+      <button class="btn btn-primary" id="backupBtn" type="button" disabled>Open archive manager</button>
+      <button class="btn btn-outline" id="restoreBtn" type="button" hidden>Restore remains gated</button>
+    </div>
+  </section>
+
+  <details class="technical">
+    <summary>Encryption and recovery details</summary>
+    <div class="technical-body">
+      <section class="key-section"><div class="key-label">Current key fingerprint</div><div class="key-value"><span class="key-fingerprint" id="currentKeyFingerprint">Not detected</span></div></section>
+      <section class="vault-section"><div class="section-header"><span class="section-title">Key vault</span><span class="key-count-badge" id="vaultKeyCount">0 keys</span></div><div class="keys-list" id="keysList"></div></section>
+    </div>
+  </details>
+
+  <footer class="footer"><span id="lastSyncTime">No archive recorded yet</span><span class="legal">© 2026 hiroP · <a href="https://github.com/docherty/archiv/blob/main/LICENSE" target="_blank" rel="noreferrer">AGPL v3</a> · no warranty · <a href="https://github.com/docherty/archiv" target="_blank" rel="noreferrer">source</a></span></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

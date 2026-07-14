@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://venice.ai https://*.venice.ai; media-src 'self' data: blob: https://venice.ai https://*.venice.ai; connect-src 'self' https://venice.ai https://*.venice.ai; object-src 'none'; base-uri 'none'">
+  <title>Venice Local Archive</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f4f1;
+      --panel: #fff;
+      --panel-soft: #f7f8f5;
+      --line: #dfe3dc;
+      --line-strong: #c4ccc4;
+      --text: #202521;
+      --muted: #657068;
+      --accent: #176b5d;
+      --accent-strong: #0f554a;
+      --accent-soft: #e3f1ed;
+      --warning: #725214;
+      --warning-soft: #f8f0d9;
+      --danger: #a33e34;
+      --danger-soft: #f8e9e7;
+      --shadow: 0 10px 30px rgba(31, 42, 35, .07);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+    button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .shell { width: min(1040px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 72px; }
+
+    .app-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand img { width: 42px; height: 42px; border-radius: 12px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 1.36rem; line-height: 1.15; letter-spacing: -.025em; }
+    .brand p { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+
+    .btn {
+      min-height: 40px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 9px 14px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 650;
+      transition: background .15s, border-color .15s, color .15s, opacity .15s;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--line-strong); background: var(--panel-soft); }
+    .btn:disabled { cursor: not-allowed; opacity: .44; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
+    .btn-secondary, .btn-quiet { border-color: var(--line); }
+    .btn-quiet { color: var(--muted); }
+    .btn-large { min-height: 50px; padding: 13px 19px; font-size: 15px; }
+
+    .badge,
+    .connection-badge,
+    .archive-location-badge,
+    .package-baseline-badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 9px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .connection-badge.ready, .archive-location-badge.ready, .package-baseline-badge.ready { background: var(--accent-soft); border-color: #bcd9d1; color: var(--accent-strong); }
+    .connection-badge.loading, .archive-location-badge.warning, .archive-location-badge.unavailable, .package-baseline-badge.warning { background: var(--warning-soft); border-color: #e4d3a4; color: var(--warning); }
+    .connection-badge.offline, .connection-badge.error { background: var(--danger-soft); border-color: #e5c0bb; color: var(--danger); }
+
+    .banner { margin-bottom: 14px; border: 1px solid transparent; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.5; }
+    .banner.hidden { display: none; }
+    .banner.success { background: var(--accent-soft); border-color: #bcd9d1; color: var(--accent-strong); }
+    .banner.warning { background: var(--warning-soft); border-color: #e4d3a4; color: var(--warning); }
+    .banner.error { background: var(--danger-soft); border-color: #e5c0bb; color: var(--danger); }
+
+    .activity-dock {
+      display: none;
+      position: sticky;
+      top: 8px;
+      z-index: 20;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,.98);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(31,42,35,.08);
+    }
+    .activity-dock.active, .activity-dock.verified, .activity-dock.warning, .activity-dock.error { display: block; }
+    .activity-dock.active { border-color: #8fc4b7; }
+    .activity-dock.warning { border-color: #e4d3a4; }
+    .activity-dock.error { border-color: #e5c0bb; }
+    .activity-head, .activity-progress-row, .activity-meta, .activity-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .activity-head { margin-bottom: 8px; }
+    .activity-head h2 { font-size: 14px; }
+    .activity-state { font-size: 10px; color: var(--muted); font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }
+    .progress-track { flex: 1; height: 7px; overflow: hidden; border-radius: 999px; background: #e6ebe6; }
+    .progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .16s ease; }
+    .activity-progress-row strong { min-width: 42px; color: var(--accent-strong); font-size: 12px; text-align: right; }
+    .activity-meta { margin-top: 7px; font-size: 12px; }
+    .activity-meta span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-meta span:last-child, .activity-foot { color: var(--muted); }
+    .activity-foot { margin-top: 6px; font-size: 11px; }
+    .activity-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-foot span:first-child { color: var(--accent-strong); }
+
+    .workflow-card { margin-bottom: 14px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+    .workflow-section { padding: 22px; }
+    .workflow-section + .workflow-section { border-top: 1px solid var(--line); }
+    .step-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+    .step-number { margin-bottom: 5px; color: var(--accent-strong); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .step-head h2 { font-size: 1.2rem; line-height: 1.25; letter-spacing: -.02em; }
+    .step-copy { max-width: 700px; margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+    .readiness-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 9px; }
+    .readiness-item { padding: 12px 13px; background: var(--panel-soft); border: 1px solid #e8ebe6; border-radius: 11px; }
+    .readiness-item span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
+    .readiness-item strong { font-size: 1.28rem; letter-spacing: -.025em; }
+    .readiness-note { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .readiness-note code { font-family: "SF Mono", Menlo, monospace; color: var(--text); }
+
+    .archive-location { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }
+    .archive-location-head, .package-flow-head, .history-topline, .inventory-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .archive-location-head strong { font-size: 14px; }
+    .archive-location-copy, .package-flow-copy, .package-baseline-meta { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .archive-location-actions, .primary-actions, .compat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+    .primary-hint { flex: 1 1 260px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    details.disclosure { border-top: 1px solid var(--line); background: #fbfcfa; }
+    details.disclosure > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 22px; cursor: pointer; font-size: 13px; font-weight: 650; }
+    details.disclosure > summary::-webkit-details-marker { display: none; }
+    details.disclosure > summary::after { content: "+"; color: var(--muted); font-size: 18px; font-weight: 400; }
+    details.disclosure[open] > summary::after { content: "−"; }
+    .disclosure-body { padding: 0 22px 20px; }
+
+    .package-diff-option, .checkbox-card, .mode-card, .post-card, .inventory-list, .log-panel { border: 1px solid var(--line); background: #fff; border-radius: 11px; }
+    .package-diff-option, .checkbox-card { display: flex; align-items: flex-start; gap: 10px; padding: 12px; cursor: pointer; }
+    .package-diff-option { margin-top: 11px; }
+    .package-diff-option:has(input:disabled) { cursor: not-allowed; opacity: .62; }
+    .option-copy span { display: block; margin-bottom: 3px; font-size: 13px; font-weight: 650; }
+    .option-copy small { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .package-baseline-badge.folder { color: var(--muted); }
+
+    .mode-grid, .option-grid, .post-export-grid { display: grid; gap: 9px; }
+    .mode-grid, .option-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .mode-card { text-align: left; padding: 14px; color: var(--text); cursor: pointer; }
+    .mode-card.active { background: var(--accent-soft); border-color: #bcd9d1; }
+    .mode-title { display: block; margin-bottom: 5px; font-size: 13px; font-weight: 700; }
+    .mode-subtitle, .mode-description, .mode-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .mode-description { margin: 10px 0; }
+    .mode-note { margin-top: 4px; }
+    .option-grid { margin-top: 10px; }
+
+    .post-export-grid { grid-template-columns: minmax(0,1fr) minmax(260px,.8fr); }
+    .post-card { padding: 15px; background: var(--panel-soft); }
+    .post-card h3 { margin-bottom: 6px; font-size: 14px; }
+    .post-card p, .post-card li, .last-export { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .post-card ul { margin: 8px 0 0 18px; padding: 0; }
+    .history-list { display: grid; gap: 7px; margin-top: 10px; }
+    .history-entry { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    .history-title, .inventory-title { min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 650; }
+    .history-meta, .inventory-meta, .inventory-preview { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .history-status, .inventory-badge { flex: none; border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; color: var(--muted); font-size: 9px; text-transform: uppercase; }
+    .history-status.verified { color: var(--accent-strong); border-color: #bcd9d1; }
+    .history-status.incomplete { color: var(--warning); border-color: #e4d3a4; }
+
+    .inventory-list { padding: 7px; }
+    .inventory-row { padding: 10px; border: 1px solid #e8ebe6; border-radius: 9px; background: var(--panel-soft); }
+    .inventory-row + .inventory-row { margin-top: 7px; }
+    .empty-state, .log-empty { padding: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+    .log-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--muted); font-size: 11px; }
+    .log-panel { max-height: 280px; overflow: auto; padding: 7px; font-family: "SF Mono", Menlo, monospace; font-size: 11px; }
+    .log-entry { padding: 7px 8px; border-bottom: 1px solid var(--line); line-height: 1.45; }
+    .log-entry:last-child { border-bottom: 0; }
+    .log-entry.info { color: var(--muted); }
+    .log-entry.success { color: var(--accent-strong); }
+    .log-entry.warning { color: var(--warning); }
+    .log-entry.error { color: var(--danger); }
+    .fine-print { margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .legal-notice { padding: 8px 4px 0; color: var(--muted); font-size: 10px; line-height: 1.5; text-align: center; }
+    .legal-notice a { color: inherit; text-underline-offset: 2px; }
+
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 20px, 1040px); padding-top: 14px; }
+      .app-header { align-items: flex-start; }
+      .brand p { display: none; }
+      .header-actions { flex-direction: column; align-items: flex-end; }
+      .badge { white-space: normal; text-align: center; }
+      .workflow-section { padding: 18px 15px; }
+      .step-head { display: block; }
+      .readiness-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .mode-grid, .option-grid, .post-export-grid { grid-template-columns: 1fr; }
+      details.disclosure > summary { padding: 14px 15px; }
+      .disclosure-body { padding: 0 15px 16px; }
+      .primary-actions .btn-large { width: 100%; }
+      .activity-foot { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="app-header">
+      <div class="brand">
+        <img src="icons/icon128.png" alt="">
+        <div>
+          <h1>Venice Local Archive</h1>
+          <p>Private, read-only backup of your Venice history</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="badge connection-badge loading" id="connectionBadge">Checking Venice</span>
+        <button class="btn btn-secondary" id="refreshBtn" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <div id="statusMessage" class="banner hidden" role="status" aria-live="polite"></div>
+
+    <section class="activity-dock" id="progressSection" aria-live="polite" aria-label="Export status">
+      <div class="activity-head">
+        <h2 id="progressHeadline">Ready to export</h2>
+        <span class="activity-state" id="progressState">Ready</span>
+      </div>
+      <div class="activity-progress-row">
+        <div class="progress-track" id="progressTrack" role="progressbar" aria-label="Archive export progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <strong id="progressPercent">0%</strong>
+      </div>
+      <div class="activity-meta">
+        <span id="progressText">Select an export action to begin.</span>
+        <span id="progressElapsed">Idle</span>
+      </div>
+      <div class="activity-foot">
+        <span id="progressLatest">No export running</span>
+        <span id="progressScope">Keep Venice open during export.</span>
+      </div>
+    </section>
+
+    <section class="workflow-card">
+      <div class="workflow-section">
+        <div class="step-head">
+          <div>
+            <p class="step-number">1 · Check</p>
+            <h2>Venice is ready to back up</h2>
+            <p class="step-copy">The extension scans Venice without changing its browser data. If this check fails, the backup button stays unavailable and the reason appears here.</p>
+          </div>
+        </div>
+        <div class="readiness-grid">
+          <div class="readiness-item"><span>Conversations</span><strong id="convCount">—</strong></div>
+          <div class="readiness-item"><span>Messages</span><strong id="msgCount">—</strong></div>
+          <div class="readiness-item"><span>Media references</span><strong id="mediaCount">—</strong></div>
+          <div class="readiness-item"><span>Archive estimate</span><strong id="estimatedSize">—</strong></div>
+        </div>
+        <p class="readiness-note" id="keyStatusMeta">Open Venice in this Brave profile, then refresh this check.</p>
+      </div>
+
+      <div class="workflow-section">
+        <div class="step-head">
+          <div>
+            <p class="step-number">2 · Back up</p>
+            <h2>Create or update your local archive</h2>
+            <p class="step-copy">The main button adapts to what Brave permits. Folder mode updates one archive in place; ZIP mode downloads a complete package first and smaller incremental packages later.</p>
+          </div>
+        </div>
+
+        <section class="archive-location" id="archiveLocationCard" aria-labelledby="archiveLocationTitle">
+          <div class="archive-location-head">
+            <strong id="archiveLocationTitle">Backup destination</strong>
+            <span class="badge archive-location-badge none" id="archiveLocationBadge">Checking</span>
+          </div>
+          <p class="archive-location-copy" id="archiveLocationCopy">Checking whether Brave can grant this extension a reusable archive folder.</p>
+          <div class="archive-location-actions">
+            <button class="btn btn-secondary" id="chooseArchiveLocationBtn" type="button">Choose archive folder</button>
+            <button class="btn btn-quiet" id="verifyArchiveLocationBtn" type="button" hidden>Verify archive</button>
+            <button class="btn btn-quiet" id="forgetArchiveLocationBtn" type="button" hidden>Forget location</button>
+          </div>
+        </section>
+
+        <div class="primary-actions">
+          <button class="btn btn-primary btn-large" id="repositoryBtn" type="button">Preparing backup…</button>
+          <span class="primary-hint" id="repositoryStatus">Waiting for the Venice readiness check.</span>
+          <button class="btn btn-secondary" id="retryDownloadsBtn" type="button" hidden>Retry download</button>
+        </div>
+      </div>
+
+      <details class="disclosure" id="repositoryPackageCard">
+        <summary>
+          <span>Incremental ZIP settings</span>
+          <span class="badge package-baseline-badge none" id="packageBaselineBadge">Full ZIP first</span>
+        </summary>
+        <div class="disclosure-body">
+          <div class="package-flow-head">
+            <div>
+              <p class="package-flow-copy">A full ZIP establishes the archive. Later incremental ZIPs contain changed files plus refreshed indexes and must be applied over that same extracted folder.</p>
+            </div>
+          </div>
+          <label class="package-diff-option">
+            <input type="checkbox" id="repositoryDiffPackage">
+            <span class="option-copy">
+              <span>Download an incremental ZIP</span>
+              <small id="packageDiffHelp">This becomes available after a full package has downloaded successfully.</small>
+            </span>
+          </label>
+          <p class="package-baseline-meta" id="packageBaselineMeta">No ZIP baseline is saved in this Brave profile yet.</p>
+        </div>
+      </details>
+
+      <details class="disclosure">
+        <summary><span>Compatibility exports and advanced options</span></summary>
+        <div class="disclosure-body">
+          <div class="mode-grid">
+            <button class="mode-card active" id="decryptedBtn" type="button">
+              <span class="mode-title">Readable archive</span>
+              <span class="mode-subtitle">Human-readable content for browsing and auditing.</span>
+            </button>
+            <button class="mode-card" id="encryptedBtn" type="button">
+              <span class="mode-title">Encrypted snapshot</span>
+              <span class="mode-subtitle">Raw Venice records for future recovery work.</span>
+            </button>
+          </div>
+          <div class="mode-description">
+            <p id="formatDescription">Readable archives keep chat content accessible in JSON.</p>
+            <p id="modeNote" class="mode-note">The local archive repository remains the preferred backup.</p>
+          </div>
+          <div class="option-grid">
+            <label class="checkbox-card"><input type="checkbox" id="includeHtmlReport" checked><span class="option-copy"><span>HTML reading guide</span><small>Companion report for the JSON export.</small></span></label>
+            <label class="checkbox-card"><input type="checkbox" id="includeMediaManifest" checked><span class="option-copy"><span>Media manifest</span><small>Counts, message links, and media references.</small></span></label>
+            <label class="checkbox-card"><input type="checkbox" id="includeMediaGallery" checked><span class="option-copy"><span>Media gallery ZIP</span><small>Separate searchable gallery of available media.</small></span></label>
+            <label class="checkbox-card"><input type="checkbox" id="includeKeyVault" checked><span class="option-copy"><span>Key-vault metadata</span><small>Preserves recovery compatibility.</small></span></label>
+          </div>
+          <div class="compat-actions">
+            <button class="btn btn-secondary" id="backupBtn" type="button">Download compatibility bundle</button>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="workflow-card">
+      <div class="workflow-section">
+        <div class="step-head">
+          <div>
+            <p class="step-number">3 · Verify and browse</p>
+            <h2>Only offload Venice data after verification</h2>
+            <p class="step-copy">Open <code>viewer/index.html</code> in the archive folder. A verified manifest and an empty unresolved-media index are the safety gate.</p>
+          </div>
+        </div>
+        <div class="post-export-grid">
+          <article class="post-card">
+            <h3>After each backup</h3>
+            <ul>
+              <li>Open the generated viewer and spot-check conversations and media.</li>
+              <li>Require the root manifest to say <strong>verified</strong>.</li>
+              <li>Keep the archive private; it contains readable personal data.</li>
+            </ul>
+          </article>
+          <article class="post-card">
+            <h3>Latest export</h3>
+            <p id="lastExportSummary" class="last-export">No archive has been downloaded from this profile yet.</p>
+            <div id="historyList" class="history-list"></div>
+          </article>
+        </div>
+      </div>
+
+      <details class="disclosure">
+        <summary><span>What will be included</span></summary>
+        <div class="disclosure-body">
+          <div class="readiness-grid" style="margin-bottom:10px">
+            <div class="readiness-item"><span>Images</span><strong id="imageCount">—</strong></div>
+            <div class="readiness-item"><span>Video references</span><strong id="videoCount">—</strong></div>
+            <div class="readiness-item"><span>Unlinked media</span><strong id="orphanCount">—</strong></div>
+            <div class="readiness-item"><span>Keys preserved</span><strong id="keyCount">—</strong></div>
+          </div>
+          <p class="fine-print">Active key fingerprint: <code id="currentKey">Waiting for Venice</code></p>
+          <div id="inventoryList" class="inventory-list" style="margin-top:12px">
+            <div class="empty-state">Coverage details appear after Venice responds.</div>
+          </div>
+        </div>
+      </details>
+
+      <details class="disclosure">
+        <summary><span>Safety and technical details</span></summary>
+        <div class="disclosure-body">
+          <div class="post-export-grid">
+            <article class="post-card">
+              <h3>Read-only by design</h3>
+              <p>The export does not rewrite Venice storage, clear the cache, or perform restore operations.</p>
+              <button class="btn btn-quiet" id="restoreBtn" type="button" style="margin-top:10px">Restore remains gated</button>
+            </article>
+            <article class="post-card">
+              <h3>Archive contents</h3>
+              <p>Lossless source stores, normalized conversations, content-addressed media, indexes, manifests, logs, and an offline viewer.</p>
+            </article>
+          </div>
+          <div class="log-heading" style="margin-top:14px"><span>Detailed activity</span><span>Shown only when needed</span></div>
+          <div class="log-panel" id="logSection"><div class="log-empty">Activity will appear here.</div></div>
+        </div>
+      </details>
+    </section>
+    <footer class="legal-notice">© 2026 hiroP · <a href="https://github.com/docherty/archiv/blob/main/LICENSE" target="_blank" rel="noreferrer">GNU AGPL v3</a> · no warranty · <a href="https://github.com/docherty/archiv" target="_blank" rel="noreferrer">source</a></footer>
+  </main>
+
+  <script src="lib/archive-repository.js"></script>
+  <script src="lib/archive-coverage.js"></script>
+  <script src="lib/agentic-transform.js"></script>
+  <script src="lib/studio-transform.js"></script>
+  <script src="lib/stream-hash.js"></script>
+  <script src="backup.js"></script>
+</body>
+</html>

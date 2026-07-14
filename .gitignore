@@ -1,0 +1,41 @@
+.vscode/
+.DS_Store
+node_modules/
+coverage/
+
+# Local credentials and machine-specific settings
+.env
+.env.*
+!.env.example
+/config.json
+/config.local.json
+*.local.json
+*.pem
+*.key
+*.p12
+
+# Never commit a user's Venice archive or browser-profile copy
+/archive/
+/venice-archive/
+/captures/
+/raw-snapshots/
+/indexes/
+/media/
+/materialized-media/
+/recovered-media/
+/recovered-content/
+/.venice-archive/
+venice-archive-*.zip
+venice-local-archive-*.zip
+*.zip
+*.tar
+*.tgz
+*.7z
+
+# Browser databases and temporary profile copies do not belong in source control
+*.ldb
+*.sqlite
+*.sqlite3
+/Default/
+/Profile */
+/Local State

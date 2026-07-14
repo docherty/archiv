@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f4f0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://venice.ai; media-src 'self' data: blob: https://venice.ai; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>Restore safety · Venice Archive</title>
+  <style>
+    :root {
+      --canvas: #f5f4f0;
+      --panel: #fff;
+      --ink: #1d241f;
+      --muted: #667068;
+      --line: #dde0d9;
+      --green: #294f37;
+      --green-hover: #203f2b;
+      --green-soft: #e8f0e9;
+      --amber: #8d5d21;
+      --amber-soft: #fbf0de;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font-size: 14px; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; }
+    a:focus-visible { outline: 3px solid rgba(54, 104, 70, .28); outline-offset: 3px; }
+    .shell { min-height: 100vh; display: grid; place-items: center; padding: 32px 18px; }
+    .card { width: min(580px, 100%); overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 20px 65px rgba(29, 42, 33, .09); }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 17px 20px; border-bottom: 1px solid var(--line); }
+    .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: var(--green); color: #fff; font-family: Georgia, "Times New Roman", serif; font-size: 20px; }
+    .brand strong, .brand span { display: block; }
+    .brand strong { font-size: 15px; letter-spacing: -.01em; }
+    .brand span { margin-top: 1px; color: var(--muted); font-size: 11px; }
+    .build { margin-left: auto; color: var(--muted); font-size: 10.5px; }
+    .content { padding: 32px 34px 34px; }
+    .status { width: max-content; display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; background: var(--amber-soft); color: var(--amber); font-size: 10.5px; font-weight: 720; }
+    .status svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    h1 { margin: 15px 0 9px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(29px, 6vw, 38px); font-weight: 500; line-height: 1.08; letter-spacing: -.025em; }
+    .lede { max-width: 50ch; margin: 0; color: #4f5951; font-size: 15px; line-height: 1.65; }
+    .safety-list { display: grid; gap: 0; margin: 25px 0; border-block: 1px solid var(--line); }
+    .safety-item { display: grid; grid-template-columns: 27px minmax(0, 1fr); gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .safety-item:last-child { border-bottom: 0; }
+    .safety-item svg { width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--green); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .safety-item strong { display: block; margin-bottom: 2px; font-size: 13px; }
+    .safety-item span { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+    .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .primary { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0 15px; border-radius: 9px; background: var(--green); color: #fff; font-size: 12.5px; font-weight: 680; text-decoration: none; transition: background .15s ease, transform .15s ease; }
+    .primary:hover { background: var(--green-hover); }
+    .primary:active { transform: translateY(1px); }
+    .reassurance { color: var(--muted); font-size: 11.5px; }
+    .legal-notice { padding: 12px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.5; text-align: center; }
+    .legal-notice a { color: inherit; text-underline-offset: 2px; }
+    @media (max-width: 520px) {
+      .shell { padding: 14px; }
+      .content { padding: 25px 21px 27px; }
+      .build { display: none; }
+      .actions { align-items: stretch; flex-direction: column; }
+      .primary { width: 100%; }
+      .reassurance { text-align: center; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <article class="card" aria-labelledby="pageTitle">
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true">V</div>
+        <div><strong>Venice Archive</strong><span>Restore safety</span></div>
+        <span class="build">Extension 0.3.4</span>
+      </header>
+      <div class="content">
+        <span class="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.5 3 7.7 7.5 9.5 4.5-1.8 7.5-5 7.5-9.5V6z"/><path d="M12 8v5m0 3h.01"/></svg>Restore is gated</span>
+        <h1 id="pageTitle">Your Venice data stays untouched.</h1>
+        <p class="lede">This release can read Venice content and save it to your local archive. It cannot write archived data back into Venice.</p>
+        <div class="safety-list">
+          <div class="safety-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><div><strong>Archive updates remain available</strong><span>You can keep fetching new conversations, images, videos, audio and attachments.</span></div></div>
+          <div class="safety-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><div><strong>Live Venice storage is read-only</strong><span>The extension does not alter browser records while creating or browsing an archive.</span></div></div>
+          <div class="safety-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><div><strong>Restore needs stronger safeguards</strong><span>It will stay unavailable until validation, dry-run, rollback and repeat-operation protections are complete.</span></div></div>
+        </div>
+        <div class="actions"><a class="primary" href="backup.html">Return to archive manager</a><span class="reassurance">Nothing has been changed in Venice.</span></div>
+      </div>
+      <footer class="legal-notice">© 2026 hiroP · <a href="https://github.com/docherty/archiv/blob/main/LICENSE" target="_blank" rel="noreferrer">GNU AGPL v3</a> · no warranty · <a href="https://github.com/docherty/archiv" target="_blank" rel="noreferrer">source</a></footer>
+    </article>
+  </main>
+</body>
+</html>
