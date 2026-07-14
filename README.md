@@ -17,15 +17,15 @@ Archiv makes a copy on your own disk (you specify where), then turns it into a l
 ## Features
 
 - Imports directly from a Brave or Chrome profile and adds later changes with an incremental sync.
-- Searches conversations, messages, prompts, filenames and models, including whole-word matching.
+- Searches conversations, messages, prompts, filenames and models so you can find what you want.
 - Reconstructs normal chats, agentic conversations and Studio sessions with media and attachments in place.
 - Provides a filterable full-resolution media gallery with favourites, hidden items, model details and local file actions.
 - Keeps verified source snapshots and unknown Venice records alongside the friendly library, so future recovery work still has the raw material.
-- Runs on your machine and serves the library only on `127.0.0.1`.
+- Runs entirely on your machine and serves the library only on `127.0.0.1`.
 
 ## A look at Archiv
 
-These screenshots show you what you get with Archiv (note: all content is from a demo account).
+This is what you get with Archiv (note: all content is from a demo account).
 
 [![Archiv Library showing recent conversations, latest media and archive health](docs/screenshots/library.jpg)](docs/screenshots/library.jpg)
 
@@ -116,8 +116,8 @@ After the first import, the archive is just a local app and an ordinary folder o
 
 - Search conversations, messages, prompts, filenames and models, with whole-word matching when you need it.
 - Read normal, agentic and Studio timelines with inputs and outputs in place.
-- Browse generated media, hide uploads or unwanted generations from the default gallery, filter by type, sort by date, session, model or filename, and star favourites.
-- Inspect full-resolution images with Fit and 100% controls, a pan navigator, double-click zoom, keyboard navigation and `I` to toggle file information.
+- Browse generated media, hide uploads or unwanted generations from the default view, filter by type, sort by date, session, model or filename, and star favourites.
+- Inspect full-resolution images with zoom controls, a pan navigator, keyboard navigation and file information.
 - Preview common attachments, download a file or reveal it in Finder/Explorer.
 - Open **Sync archive** from Library or Archive status, then choose **Fetch new content** to add later Venice activity.
 
@@ -125,7 +125,7 @@ Updates are additive. Existing verified captures are not rewritten. **Fetch new 
 
 ## What is captured
 
-- Regular, agentic/Mind and support conversations
+- Regular and agentic conversations
 - Messages, model names, timestamps and saved response metadata
 - Image Studio and Video Studio sessions
 - Generated images, video and audio
