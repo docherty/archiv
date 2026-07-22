@@ -1,6 +1,6 @@
 {
   "name": "archiv",
-  "version": "0.7.15",
+  "version": "0.7.16",
   "description": "Read-only, local-first backup and search for Venice.ai browser content",
   "private": true,
   "license": "AGPL-3.0-only",

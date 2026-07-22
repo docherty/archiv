@@ -1,6 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const APP_BUILD = '0.7.15-local';
+const APP_BUILD = '0.7.16-local';
 const MEDIA_PAGE_SIZE = 120;
 const IMAGE_ZOOM_STEPS = [12.5, 16.7, 25, 33.3, 50, 66.7, 100, 125, 150, 200, 300, 400, 600, 800];
 
@@ -216,6 +216,18 @@ function mediaFileActions(item, className = '') {
   </div>`;
 }
 
+function inlineAudioPlayer(item) {
+  const label = item.fileName || item.title || 'Archived audio';
+  return `<div class="inline-audio-player" tabindex="-1" role="group" aria-label="Audio preview for ${esc(label)}">
+    <div class="inline-audio-head">
+      <span class="inline-audio-icon" aria-hidden="true">${uiIcon('audio')}</span>
+      <div class="inline-audio-copy"><span>Audio</span><strong title="${esc(label)}">${esc(label)}</strong></div>
+      <button class="inline-audio-details" type="button" data-media="${esc(item.id)}" aria-label="Open details for ${esc(label)}" title="Open details">${infoIcon()}</button>
+    </div>
+    <audio src="${esc(item.fileUrl)}" controls preload="metadata" aria-label="Play ${esc(label)}">Audio preview unavailable.</audio>
+  </div>`;
+}
+
 function inlineMediaCard(item) {
   const disposition = ['input', 'output'].includes(item.mediaDisposition) ? item.mediaDisposition : null;
   const model = disposition === 'output' ? item.model : null;
@@ -225,7 +237,10 @@ function inlineMediaCard(item) {
   const width = Number(item.width || 0);
   const height = Number(item.height || 0);
   const aspect = width > 0 && height > 0 ? `${width} / ${height}` : item.kind === 'video' ? '16 / 9' : '4 / 3';
-  return `<article class="inline-media-shell media-${esc(item.kind)}${disposition ? ` media-${disposition}` : ''}" id="media-${domId(item.id)}" style="--media-aspect:${aspect}"><button class="inline-media-card" data-media="${esc(item.id)}" aria-label="Open ${esc(item.fileName || item.kind)}">${mediaVisual(item)}${item.kind !== 'image' ? `<span class="media-badge">${esc(item.kind)}</span>` : ''}</button>${metadata}${mediaFileActions(item, 'inline-media-actions')}</article>`;
+  const preview = item.available && item.kind === 'audio'
+    ? inlineAudioPlayer(item)
+    : `<button class="inline-media-card" data-media="${esc(item.id)}" aria-label="Open ${esc(item.fileName || item.kind)}">${mediaVisual(item)}${item.kind !== 'image' ? `<span class="media-badge">${esc(item.kind)}</span>` : ''}</button>`;
+  return `<article class="inline-media-shell media-${esc(item.kind)}${disposition ? ` media-${disposition}` : ''}" id="media-${domId(item.id)}" style="--media-aspect:${aspect}">${preview}${metadata}${mediaFileActions(item, 'inline-media-actions')}</article>`;
 }
 
 async function loadOverview(force = false) {
@@ -1335,7 +1350,7 @@ document.addEventListener('click', (event) => {
     const target = document.getElementById(`media-${domId(scrollMedia.dataset.scrollMedia)}`);
     if (!target) return;
     target.classList.add('jump-highlight');
-    target.querySelector('.inline-media-card')?.focus({ preventScroll: true });
+    target.querySelector('.inline-media-card, .inline-audio-player')?.focus({ preventScroll: true });
     requestAnimationFrame(() => target.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
     setTimeout(() => target.classList.remove('jump-highlight'), 1400);
     return;
@@ -1343,7 +1358,7 @@ document.addEventListener('click', (event) => {
   const revealMedia = event.target.closest('[data-reveal-media]');
   if (revealMedia) return api('/api/reveal-file', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: revealMedia.dataset.revealMedia }) }).then(() => toast('File shown in its folder')).catch((error) => toast(error.message));
   const media = event.target.closest('[data-media]');
-  if (media) { state.mediaOrigin = state.view; $$('.media-info-popover').forEach((node) => node.remove()); return openMedia(media.dataset.media); }
+  if (media) { $$('.inline-audio-player audio').forEach((player) => player.pause()); state.mediaOrigin = state.view; $$('.media-info-popover').forEach((node) => node.remove()); return openMedia(media.dataset.media); }
   if (event.target.closest('[data-zoom-minimise]')) { toggleZoomNavigator(); return; }
   const zoomStep = event.target.closest('[data-zoom-step]');
   if (zoomStep) { stepImageZoom(Number(zoomStep.dataset.zoomStep)); return; }
@@ -1412,6 +1427,13 @@ document.addEventListener('click', (event) => {
   if (event.target.closest('[data-sync-view]')) { closeSync(); return nav('media'); }
   if (event.target.closest('[data-retry]')) return render();
 });
+
+document.addEventListener('play', (event) => {
+  if (!(event.target instanceof HTMLAudioElement) || !event.target.closest('.inline-audio-player')) return;
+  $$('.inline-audio-player audio').forEach((player) => {
+    if (player !== event.target) player.pause();
+  });
+}, true);
 
 document.addEventListener('scroll', (event) => {
   $$('.media-info-popover').forEach((node) => node.remove());

@@ -12,7 +12,7 @@ import { ensureDirectory, pathExists } from './util.mjs';
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const UI_ROOT = path.resolve(MODULE_DIRECTORY, '../ui');
 const PROJECT_ROOT = path.resolve(MODULE_DIRECTORY, '../..');
-const BUILD = '0.7.15-local';
+const BUILD = '0.7.16-local';
 const CAPABILITIES = Object.freeze({ favourites: true, hiddenMedia: true });
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif', '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.mpeg': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.pdf': 'application/pdf' };
 const CONTENT_TYPE_CACHE = new Map();

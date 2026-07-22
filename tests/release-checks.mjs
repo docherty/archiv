@@ -231,6 +231,10 @@ function assertDurableArchiveDocsExist() {
   assert.match(read('cli/ui/app.js'), /ArrowRight/);
   assert.match(read('cli/ui/app.js'), /syncResultMarkup/);
   assert.match(read('cli/ui/app.js'), /inline-media-card/);
+  assert.match(read('cli/ui/app.js'), /function inlineAudioPlayer/);
+  assert.match(read('cli/ui/app.js'), /<audio src=.* controls preload="metadata"/);
+  assert.match(read('cli/ui/app.js'), /document\.addEventListener\('play'/);
+  assert.match(read('cli/ui/app.css'), /\.inline-audio-player audio/);
   assert.match(read('cli/ui/app.js'), /search-review-workspace/);
   assert.match(read('cli/ui/app.js'), /data-search-step/);
   assert.match(read('cli/ui/app.js'), /archiveHealth/);
