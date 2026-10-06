@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ensureDirectory, listFiles, pathExists, run, sha256File, timestampId } from './util.mjs';
 import { cleanupFailedSnapshot, prepareSnapshotCache } from './snapshot-cache.mjs';
 import { copySnapshotPath as cp } from './snapshot-copy.mjs';
+import { latestArchivedSnapshot } from './raw-store.mjs';
 
 const PROFILE_PATHS = [
   'Preferences',
@@ -68,7 +69,7 @@ async function latestReusableSnapshot(archiveDirectory, profileDirectory, snapsh
       .sort()
       .reverse();
   } catch {
-    return null;
+    return (await latestArchivedSnapshot(archiveDirectory, profileDirectory))?.manifest || null;
   }
   for (const name of names) {
     try {
@@ -79,7 +80,7 @@ async function latestReusableSnapshot(archiveDirectory, profileDirectory, snapsh
       // An incomplete snapshot has no reusable integrity index.
     }
   }
-  return null;
+  return (await latestArchivedSnapshot(archiveDirectory, profileDirectory))?.manifest || null;
 }
 
 export async function inventoryConsistencyFiles(profilePath, { precise = false } = {}) {

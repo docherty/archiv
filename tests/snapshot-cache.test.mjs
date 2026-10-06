@@ -6,6 +6,7 @@ import test from 'node:test';
 import { cleanupFailedSnapshot, prepareSnapshotCache, markSnapshotCaptured, pruneSnapshotCache } from '../cli/lib/snapshot-cache.mjs';
 import { createRawSnapshot, verifyRawSnapshot } from '../cli/lib/snapshot.mjs';
 import { extractSnapshot } from '../cli/lib/extract.mjs';
+import { persistRawSnapshot, retainFailedRawSnapshot, archivedSnapshotManifest, withRawSnapshot } from '../cli/lib/raw-store.mjs';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'archiv-cache-test-'));
@@ -78,6 +79,46 @@ test('managed snapshots stay local, verify, reuse hashes and prune only their ow
   assert.ok((await stat(uncaptured)).isDirectory()); // Stable copy with failed extraction can hold unique recovery data.
   await assert.rejects(pruneSnapshotCache(cache, historical, 2), /not a stable managed/);
   await assert.rejects(pruneSnapshotCache(cache, current.snapshotRoot, 0), /at least two/);
+});
+
+test('one working copy is safe only with durable raw history; restores and integrity reuse survive cache removal', async (t) => {
+  const { root, setup } = await fixture(t);
+  const cache = path.join(root, 'cache');
+  const copies = [];
+  for (let i = 0; i < 2; i++) {
+    const copy = await createRawSnapshot({ ...setup, snapshotDirectory: cache, minimumFreeBytes: 0, requireClone: process.platform === 'darwin' });
+    if (i > 0) await markSnapshotCaptured(copy.snapshotRoot, `capture-fixture-${i}`, { outsideSnapshot: true });
+    await persistRawSnapshot(setup.archiveDirectory, copy.snapshotRoot);
+    copies.push(copy);
+  }
+  const current = copies.at(-1);
+  assert.equal((await pruneSnapshotCache(cache, current.snapshotRoot, 1, { archiveDirectory: setup.archiveDirectory })).length, 1);
+  assert.equal((await readdir(cache)).filter((name) => name.startsWith('snapshot-')).length, 1);
+  assert.equal((await archivedSnapshotManifest(setup.archiveDirectory, copies[0].manifest.snapshotId)).snapshotId, copies[0].manifest.snapshotId);
+  await persistRawSnapshot(setup.archiveDirectory, current.snapshotRoot, { removeSource: true });
+  const next = await createRawSnapshot({ ...setup, snapshotDirectory: cache, minimumFreeBytes: 0 });
+  assert.ok(next.manifest.integrity.reusedHashes >= 1);
+  let temporary;
+  await withRawSnapshot(setup.archiveDirectory, copies[0].manifest.snapshotId, async (restored) => {
+    temporary = restored;
+    assert.equal((await verifyRawSnapshot(restored)).ok, true);
+    assert.equal(await readFile(path.join(restored, 'user-data/Default/Preferences'), 'utf8'), '{}');
+  });
+  await assert.rejects(stat(temporary), /ENOENT/);
+});
+
+test('decoder failure still archives raw unknown data and cannot hide the original error', async (t) => {
+  const { root, setup } = await fixture(t);
+  const copy = await createRawSnapshot({ ...setup, snapshotDirectory: path.join(root, 'cache'), minimumFreeBytes: 0 });
+  const error = new Error('future unknown Venice schema');
+  await assert.rejects(retainFailedRawSnapshot(setup.archiveDirectory, copy.snapshotRoot, error), (result) => result === error);
+  await assert.rejects(stat(copy.snapshotRoot), /ENOENT/);
+  assert.equal((await archivedSnapshotManifest(setup.archiveDirectory, copy.manifest.snapshotId)).snapshotId, copy.manifest.snapshotId);
+  const next = await createRawSnapshot({ ...setup, snapshotDirectory: path.join(root, 'cache'), minimumFreeBytes: 0 });
+  const invalidArchive = path.join(root, 'invalid-archive'); await writeFile(invalidArchive, 'not a directory');
+  const secondError = new Error('decoder failure plus disk error');
+  await assert.rejects(retainFailedRawSnapshot(invalidArchive, next.snapshotRoot, secondError), (result) => result === secondError && Boolean(result.rawHistoryPersistenceError));
+  assert.equal((await verifyRawSnapshot(next.snapshotRoot)).ok, true);
 });
 
 test('browser startup failure cleans the disposable extraction workspace', async (t) => {

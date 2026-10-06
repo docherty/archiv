@@ -2,6 +2,8 @@
 .DS_Store
 node_modules/
 coverage/
+__pycache__/
+*.py[cod]
 
 # Local credentials and machine-specific settings
 .env
@@ -19,6 +21,7 @@ coverage/
 /venice-archive/
 /captures/
 /raw-snapshots/
+/raw-store/
 /indexes/
 /media/
 /materialized-media/

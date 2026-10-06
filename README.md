@@ -77,6 +77,7 @@ Brave is the browser Archiv is built around—and, obviously, **the browser you 
 ### Requirements
 
 - Git and [Node.js](https://nodejs.org/) 18 or newer
+- Python 3.9+ for lossless raw history (macOS/Linux; Windows raw-store tooling needs a port)
 - A Brave or Chrome profile containing Venice data
 - Enough free disk space for a temporary safety copy of the browser data and the resulting archive
 
@@ -162,7 +163,8 @@ The archive is ordinary, inspectable data:
 
 ```text
 captures/           verified extracted captures
-raw-snapshots/      immutable browser safety copies
+raw-store/          deduplicated raw bytes, every dated tree and recovery metadata
+raw-snapshots/      legacy copies (migrate explicitly; never latest-only prune)
 indexes/            searchable conversation, message and media indexes
 media/              files imported from older archive packages, when present
 materialized-media/ full-resolution files decoded from source stores
@@ -176,6 +178,8 @@ Check the archive without loading it all into memory:
 ```bash
 npm run verify:archive -- /absolute/path/to/archive
 ```
+
+Read the [preservation and recovery design](docs/archive-preservation.md): raw history stores identical bytes once, retains every version, and remains independent of Global Memory. Search/index exports are rebuildable views. New syncs keep one private working clone, not a growing pile of full browser backups.
 
 If you have older Venice downloads, audit them before importing anything:
 

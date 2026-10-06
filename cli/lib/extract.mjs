@@ -1,5 +1,5 @@
 import { constants as fsConstants, createWriteStream } from 'node:fs';
-import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -162,7 +162,7 @@ async function writeStore(client, captureDirectory, store, onProgress) {
   return { ...storeState(store), path: path.relative(captureDirectory, outputPath).split(path.sep).join('/'), records, expectedRecords: store.count ?? null };
 }
 
-async function writeOpfs(client, captureDirectory, items, onProgress) {
+export async function writeOpfs(client, captureDirectory, items, onProgress) {
   const results = [];
   for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
     const item = items[itemIndex];
@@ -171,15 +171,25 @@ async function writeOpfs(client, captureDirectory, items, onProgress) {
     const relative = `${pathHash.slice(0, 2)}/${pathHash}--${safeName(path.basename(String(item.fileName || item.path), extension))}${extension}`;
     const outputPath = path.join(captureDirectory, 'opfs', relative);
     await ensureDirectory(path.dirname(outputPath));
-    const output = createWriteStream(outputPath);
+    const output = await open(outputPath, 'wx', 0o600);
     let offset = 0;
-    while (true) {
-      const chunk = await pageCommand(client, 'FETCH_OPFS_MEDIA', { path: item.path, offset, chunkSize: 512 * 1024 });
-      if (chunk.chunkBase64) output.write(Buffer.from(chunk.chunkBase64, 'base64'));
-      if (chunk.done || chunk.nextOffset <= offset) break;
-      offset = chunk.nextOffset;
-    }
-    await new Promise((resolve, reject) => { output.end(resolve); output.once('error', reject); });
+    try {
+      while (true) {
+        // The page reader already supports 4 MiB. Larger bounded chunks reduce
+        // expensive CDP/event/handle round trips without buffering whole videos.
+        const chunk = await pageCommand(client, 'FETCH_OPFS_MEDIA', { path: item.path, offset, chunkSize: 4 * 1024 * 1024 });
+        const bytes = Buffer.from(chunk.chunkBase64 || '', 'base64');
+        const invalid = bytes.length > 4 * 1024 * 1024 || chunk.chunkBytes !== bytes.length
+          || chunk.offset !== offset || chunk.sizeBytes !== item.size
+          || chunk.nextOffset !== offset + bytes.length || chunk.nextOffset > item.size
+          || chunk.done !== (chunk.nextOffset === item.size) || (!chunk.done && !bytes.length);
+        if (invalid) throw new Error(`Invalid OPFS chunk bounds: ${item.path}`);
+        await output.writeFile(bytes); // Apply I/O backpressure and propagate errors.
+        offset = chunk.nextOffset;
+        if (chunk.done) break;
+      }
+      if (offset !== item.size) throw new Error(`Incomplete OPFS file: ${item.path}`);
+    } finally { await output.close(); }
     results.push({ ...item, archivedPath: path.relative(captureDirectory, outputPath).split(path.sep).join('/') });
     onProgress(`OPFS ${itemIndex + 1}/${items.length}: ${item.path}`);
   }

@@ -13,6 +13,7 @@ import { startArchiveService } from './lib/service.mjs';
 import { verifyCapture } from './lib/verify-capture.mjs';
 import { formatBytes, parseArgs, pathExists } from './lib/util.mjs';
 import { markSnapshotCaptured, pruneSnapshotCache } from './lib/snapshot-cache.mjs';
+import { defaultSnapshotCache, persistRawSnapshot, retainFailedRawSnapshot, withRawSnapshot, latestArchivedSnapshot, runRawStore } from './lib/raw-store.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,12 +27,15 @@ Usage:
   npm run archive -- snapshot --archive <folder> [--allow-running]
   npm run archive -- sync --archive <folder> [--allow-running]
   npm run archive -- extract --archive <folder> [--snapshot latest|<folder>]
-  # Optional sync cache: --snapshot-directory <private local folder> --snapshot-retain 2 --require-clone
+  # Optional sync cache: --snapshot-directory <private local folder> --snapshot-retain 1 --require-clone
   npm run archive -- import --archive <folder> --zip <archive.zip>
   npm run archive -- index --archive <folder>
   npm run archive -- search --archive <folder> <words> [--limit 25]
   npm run archive -- serve --archive <folder> [--browser brave] [--profile "Work"] [--port 43110]
   npm run archive -- verify-snapshot --snapshot <folder>
+  npm run archive -- history --archive <folder>
+  npm run archive -- verify-history --archive <folder>
+  npm run archive -- restore-snapshot --archive <folder> --snapshot <id> --destination <new folder>
   npm run archive -- verify-capture --archive <folder> [--capture latest|<folder>]
   npm run archive -- materialize-media --archive <folder>
 
@@ -79,12 +83,14 @@ async function hasControlledCapture(archiveDirectory) {
 async function resolveSnapshot(archiveDirectory, requested = 'latest') {
   if (requested && requested !== 'latest') return path.resolve(String(requested));
   const root = path.join(archiveDirectory, 'raw-snapshots');
-  const entries = (await readdir(root, { withFileTypes: true }))
+  let entries = [];
+  try { entries = (await readdir(root, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('snapshot-'))
-    .map((entry) => entry.name)
-    .sort();
-  if (!entries.length) throw new Error('No raw snapshots are available for extraction.');
-  return path.join(root, entries.at(-1));
+    .map((entry) => entry.name).sort(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (entries.length) return path.join(root, entries.at(-1));
+  const stored = await latestArchivedSnapshot(archiveDirectory);
+  if (!stored) throw new Error('No complete raw snapshots are available for extraction.');
+  return stored.identity;
 }
 
 async function resolveCapture(archiveDirectory, requested = 'latest') {
@@ -148,8 +154,8 @@ async function completeExtraction(setup, snapshotRoot, emit = () => {}, sourceCh
   };
 }
 
-async function syncArchive(setup, { allowRunning = false, snapshotDirectory = null, requireClone = false, retainSnapshots = 2, emit = () => {} } = {}) {
-  if (snapshotDirectory && (!Number.isSafeInteger(retainSnapshots) || retainSnapshots < 2)) throw new Error('Keep at least two managed snapshots.');
+async function syncArchive(setup, { allowRunning = false, snapshotDirectory = defaultSnapshotCache(setup.archiveDirectory), requireClone = process.platform === 'darwin', retainSnapshots = 1, emit = () => {} } = {}) {
+  if (snapshotDirectory && (!Number.isSafeInteger(retainSnapshots) || retainSnapshots < 1)) throw new Error('Keep at least one disposable working snapshot; raw history lives in the store.');
   emit({ phase: 'discover', message: 'Checking for changes since the last verified update…' });
   const checkpoint = await sourceCheckpointStatus(setup);
   if (checkpoint.matches) {
@@ -160,13 +166,21 @@ async function syncArchive(setup, { allowRunning = false, snapshotDirectory = nu
   }
   if (checkpoint.available) emit({ phase: 'snapshot', message: `Venice storage changed in ${checkpoint.changes.length} place${checkpoint.changes.length === 1 ? '' : 's'}; saving the delta safely…` });
   const snapshot = await createRawSnapshot({ ...setup, allowRunning, snapshotDirectory, requireClone, onProgress: (message) => { console.log(`[snapshot] ${message}`); emit({ phase: 'snapshot', message }); } });
-  const result = await completeExtraction(setup, snapshot.snapshotRoot, emit, checkpoint.changes);
+  // Preserve before decoding: unknown schemas and hard process deadlines cannot
+  // turn a complete, quiet source snapshot into an unarchived disposable cache.
+  await persistRawSnapshot(setup.archiveDirectory, snapshot.snapshotRoot, { requireClone, onProgress: (message) => console.log(`[raw-store] ${message}`) });
+  let result;
+  try { result = await completeExtraction(setup, snapshot.snapshotRoot, emit, checkpoint.changes); }
+  catch (error) { return retainFailedRawSnapshot(setup.archiveDirectory, snapshot.snapshotRoot, error); }
+  await runRawStore(setup.archiveDirectory, ['record-capture', '--snapshot', snapshot.manifest.snapshotId, '--capture', result.captureId]);
+  // Operational receipts live outside the immutable raw tree, so successful
+  // decoding doesn't require a second full metadata tree or any duplicate bytes.
+  await markSnapshotCaptured(snapshot.snapshotRoot, result.captureId, { outsideSnapshot: true });
   await saveSourceCheckpoint({ ...setup, snapshotManifest: snapshot.manifest, captureId: result.captureId });
   if (snapshotDirectory) {
     try {
-      await markSnapshotCaptured(snapshot.snapshotRoot, result.captureId);
-      const removed = await pruneSnapshotCache(snapshotDirectory, snapshot.snapshotRoot, retainSnapshots);
-      if (removed.length) console.log(`[snapshot] Pruned ${removed.length} superseded managed copies after verified capture; historical archive snapshots untouched`);
+      const removed = await pruneSnapshotCache(snapshotDirectory, snapshot.snapshotRoot, retainSnapshots, { archiveDirectory: setup.archiveDirectory });
+      if (removed.length) console.log(`[snapshot] Removed ${removed.length} verified working copies; all raw history remains in the deduplicated store`);
     } catch (error) { console.warn(`[snapshot] Managed cache cleanup failed: ${error.message}`); }
   }
   return result;
@@ -176,6 +190,13 @@ async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (!command || command === 'help' || command === '--help' || command === '-h' || options.help || options.h) return usage();
 
+  if (['history', 'verify-history', 'restore-snapshot'].includes(command)) {
+    const archive = required(options, 'archive');
+    const args = command === 'history' ? ['list'] : command === 'verify-history' ? ['verify']
+      : ['restore', '--snapshot', String(options.snapshot || ''), '--destination', required(options, 'destination'), ...(process.platform === 'darwin' ? ['--require-clone'] : []), ...(options.portable ? ['--portable'] : [])];
+    console.log((await runRawStore(archive, args)).trim());
+    return;
+  }
   if (command === 'discover') {
     const { browser, profiles } = await discoverProfiles(String(options.browser || 'brave'));
     console.log(`${browser.name}: ${browser.userDataDirectory}`);
@@ -201,8 +222,9 @@ async function main() {
 
   if (command === 'snapshot') {
     const setup = await resolveSetup(options);
-    const result = await createRawSnapshot({ ...setup, allowRunning: Boolean(options['allow-running']), onProgress: (message) => console.log(message) });
-    console.log(`Verified-source snapshot created: ${result.snapshotRoot}`);
+    const result = await createRawSnapshot({ ...setup, snapshotDirectory: defaultSnapshotCache(setup.archiveDirectory), requireClone: process.platform === 'darwin', allowRunning: Boolean(options['allow-running']), onProgress: (message) => console.log(message) });
+    await persistRawSnapshot(setup.archiveDirectory, result.snapshotRoot, { removeSource: true });
+    console.log(`Verified-source raw history preserved: ${result.manifest.snapshotId} in ${path.join(setup.archiveDirectory, 'raw-store')}`);
     console.log(`${result.manifest.files.length} files, ${formatBytes(result.manifest.totalBytes)}`);
     return;
   }
@@ -211,16 +233,16 @@ async function main() {
     const setup = await resolveSetup(options);
     await syncArchive(setup, {
       allowRunning: Boolean(options['allow-running']),
-      snapshotDirectory: options['snapshot-directory'] ? required(options, 'snapshot-directory') : null,
-      requireClone: Boolean(options['require-clone']),
-      retainSnapshots: options['snapshot-retain'] === undefined ? 2 : Number(options['snapshot-retain'])
+      snapshotDirectory: options['snapshot-directory'] ? required(options, 'snapshot-directory') : defaultSnapshotCache(setup.archiveDirectory),
+      requireClone: process.platform === 'darwin' || Boolean(options['require-clone']),
+      retainSnapshots: options['snapshot-retain'] === undefined ? 1 : Number(options['snapshot-retain'])
     });
     return;
   }
 
   if (command === 'extract') {
     const setup = await resolveSetup(options);
-    await completeExtraction(setup, await resolveSnapshot(setup.archiveDirectory, String(options.snapshot || 'latest')));
+    await withRawSnapshot(setup.archiveDirectory, await resolveSnapshot(setup.archiveDirectory, String(options.snapshot || 'latest')), (snapshotRoot) => completeExtraction(setup, snapshotRoot));
     return;
   }
 
