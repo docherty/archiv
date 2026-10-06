@@ -321,8 +321,8 @@ async function main() {
 
   if (command === 'materialize-media') {
     const archiveDirectory = required(options, 'archive');
-    const result = await materializeEmbeddedMedia(archiveDirectory, { apply: true, onProgress: (message) => console.log(message) });
-    console.log(`Full-resolution media: ${result.added} added, ${result.total} total, ${formatBytes(result.bytes)} written.`);
+    const result = await materializeEmbeddedMedia(archiveDirectory, { apply: !options['dry-run'], reprocess: Boolean(options.reprocess), onProgress: (message) => console.log(message) });
+    console.log(`Full-resolution media (${result.mode}): ${result.added} ${options['dry-run'] ? 'would be added' : 'added'}, ${result.total} total, ${formatBytes(result.bytes)} ${options['dry-run'] ? 'would be written' : 'written'}.`);
     return;
   }
 

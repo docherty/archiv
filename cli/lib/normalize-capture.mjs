@@ -2,6 +2,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
+import { resolveAssetPath } from './asset-store.mjs';
 
 function text(value) {
   if (typeof value === 'string') return value;
@@ -255,7 +256,7 @@ export async function normalizeCapture(captureDirectory) {
   for (const item of manifest.opfs || []) {
     if (!internalMediaSidecar(item) || !item.archivedPath) continue;
     try {
-      const metadata = JSON.parse(await readFile(path.join(captureDirectory, item.archivedPath), 'utf8'));
+      const metadata = JSON.parse(await readFile(await resolveAssetPath(path.resolve(captureDirectory, '../..'), path.join(captureDirectory, item.archivedPath)), 'utf8'));
       if (!/^[a-f0-9]{64}$/i.test(String(metadata.hash || ''))) continue;
       const original = String(item.path || '').replaceAll('\\', '/');
       opfsSidecars.set(path.posix.join(path.posix.dirname(original), String(metadata.hash)), metadata);

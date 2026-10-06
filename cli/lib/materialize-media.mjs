@@ -5,6 +5,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { correctMediaFileExtension, decodeBinaryPayload, inspectMedia } from './media-bytes.mjs';
 import { pathExists, sha256File } from './util.mjs';
+import { resolveAssetPath } from './asset-store.mjs';
 
 function unwrap(record) {
   let value = record;
@@ -130,6 +131,8 @@ async function messageLookup(captures) {
 
 async function writeContentAddressed(root, relative, bytes, sha256) {
   const destination = path.join(root, ...relative.split('/'));
+  const referenced = await resolveAssetPath(path.dirname(root), destination, sha256);
+  if (referenced !== destination) return referenced;
   await mkdir(path.dirname(destination), { recursive: true });
   if (await pathExists(destination)) {
     const fileStat = await stat(destination);
@@ -150,7 +153,7 @@ async function verifyLayerFiles(layerRoot, items, onProgress) {
   const unique = new Map(items.map((item) => [item.path, item]));
   let index = 0;
   for (const item of unique.values()) {
-    const file = path.join(layerRoot, ...String(item.path || '').split('/'));
+    const file = await resolveAssetPath(path.dirname(layerRoot), path.join(layerRoot, ...String(item.path || '').split('/')), item.sha256);
     const fileStat = await stat(file);
     if (fileStat.size !== Number(item.bytes) || await sha256File(file) !== item.sha256) throw new Error(`Full-resolution media verification failed: ${item.fileName || item.path}`);
     index += 1;
@@ -170,7 +173,7 @@ function materializationManifest(items, processed, verifiedTotals) {
   };
 }
 
-export async function materializeEmbeddedMedia(archiveDirectory, { apply = true, onProgress = () => {} } = {}) {
+export async function materializeEmbeddedMedia(archiveDirectory, { apply = true, reprocess = false, onProgress = () => {} } = {}) {
   const archiveRoot = path.resolve(archiveDirectory);
   const layerRoot = path.join(archiveRoot, 'materialized-media');
   const indexes = path.join(layerRoot, 'indexes');
@@ -185,7 +188,7 @@ export async function materializeEmbeddedMedia(archiveDirectory, { apply = true,
     for (const store of capture.manifest.stores || []) {
       if (!possibleInlineMediaStore(store.name)) continue;
       const key = storeKey(capture, store);
-      if (!processed.has(key)) pending.push({ capture, store, key });
+      if (reprocess || !processed.has(key)) pending.push({ capture, store, key });
     }
   }
   const needsLayerVerification = previousDocument.items?.length && (previousManifest.schemaVersion !== 2 || previousManifest.verification?.status !== 'verified');

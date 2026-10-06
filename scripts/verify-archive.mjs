@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { resolveAssetPath } from '../cli/lib/asset-store.mjs';
 
 const REPOSITORY_SCHEMA_VERSION = '1.0.0';
 const EXPECTED_INDEXES = Object.freeze({
@@ -86,13 +87,16 @@ async function verifyArchive(archiveRoot) {
         errors.push(`Media path is not content-addressed by its SHA-256: ${relativePath}.`);
       }
     }
-    const fileStat = await safeStat(filePath, errors, `media ${relativePath}`);
+    let readablePath;
+    try { readablePath = await resolveAssetPath(archiveRoot, filePath, item.sha256); }
+    catch (error) { errors.push(`Media reference verification failed: ${relativePath} (${error.message}).`); continue; }
+    const fileStat = await safeStat(readablePath, errors, `media ${relativePath}`);
     if (!fileStat) continue;
     if (Number.isFinite(Number(item.bytes)) && Number(item.bytes) !== fileStat.size) {
       errors.push(`Media byte mismatch for ${relativePath}: index ${item.bytes}, file ${fileStat.size}.`);
     }
     if (item.sha256) {
-      const digest = await hashFile(filePath);
+      const digest = await hashFile(readablePath);
       if (digest !== item.sha256) {
         errors.push(`Media SHA-256 mismatch for ${relativePath}.`);
       }

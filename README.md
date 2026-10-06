@@ -181,6 +181,8 @@ npm run verify:archive -- /absolute/path/to/archive
 
 Read the [preservation and recovery design](docs/archive-preservation.md): raw history stores identical bytes once, retains every version, and remains independent of Global Memory. Search/index exports are rebuildable views. New syncs keep one private working clone, not a growing pile of full browser backups.
 
+For consolidated standalone media, see the [shared asset store and independent working-view recovery](docs/shared-asset-store.md). Historical paths resolve through the library; filesystem-only consumers must restore an explicit working view.
+
 If you have older Venice downloads, audit them before importing anything:
 
 ```bash

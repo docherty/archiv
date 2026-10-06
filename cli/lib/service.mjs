@@ -8,6 +8,7 @@ import { ArchiveCatalog } from './catalog.mjs';
 import { materializeEmbeddedMedia } from './materialize-media.mjs';
 import { inspectMediaSignature } from './media-bytes.mjs';
 import { ensureDirectory, pathExists } from './util.mjs';
+import { assetWorkingCopy, resolveAssetPath } from './asset-store.mjs';
 
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const UI_ROOT = path.resolve(MODULE_DIRECTORY, '../ui');
@@ -74,6 +75,10 @@ async function existingPathWithin(base, candidate) {
     return null;
   }
 }
+function privateStorePath(base, candidate) {
+  return ['raw-store', 'asset-store', 'raw-snapshots'].includes(path.relative(base, candidate).split(path.sep)[0]);
+}
+
 const ARCHIVE_FILE_HEADERS = {
   ...SECURITY_HEADERS,
   'content-security-policy': "default-src 'none'; frame-ancestors 'self'",
@@ -107,27 +112,28 @@ function readBody(request) {
   });
 }
 
-async function contentTypeForFile(filePath, fileStat) {
-  const cached = CONTENT_TYPE_CACHE.get(filePath);
+async function contentTypeForFile(filePath, fileStat, logicalFileName = filePath) {
+  const cacheKey = `${filePath}:${path.extname(logicalFileName)}`;
+  const cached = CONTENT_TYPE_CACHE.get(cacheKey);
   if (cached?.bytes === fileStat.size && cached?.modified === fileStat.mtimeMs) return cached.contentType;
-  const extensionType = MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+  const extensionType = MIME[path.extname(logicalFileName).toLowerCase()] || 'application/octet-stream';
   const header = Buffer.alloc(Math.min(MEDIA_HEADER_BYTES, fileStat.size));
   let handle;
   try {
     handle = await open(filePath, 'r');
     const { bytesRead } = await handle.read(header, 0, header.length, 0);
-    const detected = inspectMediaSignature(header.subarray(0, bytesRead), filePath, extensionType);
+    const detected = inspectMediaSignature(header.subarray(0, bytesRead), logicalFileName, extensionType);
     const contentType = detected?.mimeType || extensionType;
-    CONTENT_TYPE_CACHE.set(filePath, { bytes: fileStat.size, modified: fileStat.mtimeMs, contentType });
+    CONTENT_TYPE_CACHE.set(cacheKey, { bytes: fileStat.size, modified: fileStat.mtimeMs, contentType });
     return contentType;
   } finally {
     await handle?.close();
   }
 }
 
-async function serveFile(request, response, filePath, cacheControl = 'private, max-age=3600', { embeddable = false, extraHeaders = {} } = {}) {
+async function serveFile(request, response, filePath, cacheControl = 'private, max-age=3600', { embeddable = false, extraHeaders = {}, logicalFileName = filePath } = {}) {
   const fileStat = await stat(filePath);
-  const contentType = await contentTypeForFile(filePath, fileStat);
+  const contentType = await contentTypeForFile(filePath, fileStat, logicalFileName);
   const headers = embeddable ? ARCHIVE_FILE_HEADERS : SECURITY_HEADERS;
   const stream = (options) => {
     const input = createReadStream(filePath, options);
@@ -137,18 +143,25 @@ async function serveFile(request, response, filePath, cacheControl = 'private, m
   const range = request.headers.range;
   if (range) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (match) {
-      const start = match[1] ? Number(match[1]) : 0;
-      const end = match[2] ? Math.min(Number(match[2]), fileStat.size - 1) : fileStat.size - 1;
-      if (start <= end && start < fileStat.size) {
-        response.writeHead(206, { ...headers, ...extraHeaders, 'content-type': contentType, 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${fileStat.size}`, 'accept-ranges': 'bytes' });
-        stream({ start, end });
-        return;
-      }
+    if (!match || (!match[1] && !match[2]) || fileStat.size === 0) {
+      response.writeHead(416, { ...headers, 'content-range': `bytes */${fileStat.size}` });
+      response.end();
+      return;
     }
+    const suffix = !match[1];
+    const start = suffix ? Math.max(0, fileStat.size - Number(match[2])) : Number(match[1]);
+    const end = suffix || !match[2] ? fileStat.size - 1 : Math.min(Number(match[2]), fileStat.size - 1);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= fileStat.size || suffix && Number(match[2]) <= 0) {
+      response.writeHead(416, { ...headers, 'content-range': `bytes */${fileStat.size}` });
+      response.end();
+      return;
+    }
+    response.writeHead(206, { ...headers, ...extraHeaders, 'content-type': contentType, 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${fileStat.size}`, 'accept-ranges': 'bytes' });
+    if (request.method === 'HEAD') response.end(); else stream({ start, end });
+    return;
   }
   response.writeHead(200, { ...headers, ...extraHeaders, 'content-type': contentType, 'content-length': fileStat.size, 'accept-ranges': 'bytes', 'cache-control': cacheControl });
-  stream();
+  if (request.method === 'HEAD') response.end(); else stream();
 }
 
 function phaseFor(message) {
@@ -209,7 +222,7 @@ function attachmentDisposition(fileName) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
-export async function startArchiveService(archiveDirectory, { port = 0, host = '127.0.0.1', onSync = null, onOpenLocation = openDirectory, onRevealFile = revealFile, source = null, autoSync = false } = {}) {
+export async function startArchiveService(archiveDirectory, { port = 0, host = '127.0.0.1', onSync = null, onOpenLocation = openDirectory, onRevealFile = revealFile, source = null, autoSync = false, viewDirectory = null } = {}) {
   if (!isLoopbackHost(host)) throw new Error('Venice Archive can only listen on a loopback address (127.0.0.1, localhost or ::1).');
   const root = path.resolve(archiveDirectory);
   await materializeEmbeddedMedia(root, { apply: true });
@@ -244,7 +257,10 @@ export async function startArchiveService(archiveDirectory, { port = 0, host = '
     if (!sourceDirectory) return null;
     const filePath = path.resolve(sourceDirectory, item.path);
     if (filePath !== sourceDirectory && !filePath.startsWith(`${sourceDirectory}${path.sep}`)) return null;
-    const safePath = await existingPathWithin(rootRealPath, filePath);
+    if (privateStorePath(root, filePath)) return null;
+    const resolved = await resolveAssetPath(root, filePath, item.sha256);
+    const safePath = await existingPathWithin(rootRealPath, resolved);
+    if (safePath && privateStorePath(rootRealPath, safePath) && resolved === filePath) return null;
     return safePath ? { item, filePath: safePath } : null;
   };
   const updateSync = (update) => {
@@ -338,13 +354,16 @@ export async function startArchiveService(archiveDirectory, { port = 0, host = '
         const body = JSON.parse(await readBody(request) || '{}');
         const resolved = await resolveMediaFile(String(body.id || ''));
         if (!resolved) return json(response, 404, { error: 'This archived file is no longer present.' });
-        await onRevealFile(resolved.filePath);
+        const location = privateStorePath(rootRealPath, resolved.filePath)
+          ? await assetWorkingCopy(root, resolved.filePath, resolved.item.fileName || path.basename(resolved.item.path), resolved.item.sha256, viewDirectory)
+          : resolved.filePath;
+        await onRevealFile(location);
         return json(response, 200, { ok: true });
       }
       if (url.pathname.startsWith('/api/download/')) {
         const resolved = await resolveMediaFile(decodeURIComponent(url.pathname.slice('/api/download/'.length)));
         if (!resolved) return json(response, 404, { error: 'This archived file is no longer present.' });
-        return await serveFile(request, response, resolved.filePath, 'no-store', { extraHeaders: { 'content-disposition': attachmentDisposition(resolved.item.fileName || resolved.filePath) } });
+        return await serveFile(request, response, resolved.filePath, 'no-store', { logicalFileName: resolved.item.fileName || resolved.item.path, extraHeaders: { 'content-disposition': attachmentDisposition(resolved.item.fileName || resolved.filePath) } });
       }
       if (url.pathname.startsWith('/api/file/')) {
         const [, , , encodedSource, ...encodedPath] = url.pathname.split('/');
@@ -354,9 +373,12 @@ export async function startArchiveService(archiveDirectory, { port = 0, host = '
         const relative = encodedPath.map(decodeURIComponent).join('/');
         const filePath = path.resolve(source, relative);
         if (filePath !== source && !filePath.startsWith(`${source}${path.sep}`)) return json(response, 403, { error: 'File path is outside the archive.' });
-        const safePath = await existingPathWithin(rootRealPath, filePath);
+        if (privateStorePath(root, filePath)) return json(response, 403, { error: 'Preservation internals are not media routes.' });
+        const resolved = await resolveAssetPath(root, filePath);
+        const safePath = await existingPathWithin(rootRealPath, resolved);
         if (!safePath) return json(response, 404, { error: 'This archived file is no longer present.' });
-        return await serveFile(request, response, safePath, 'private, max-age=3600', { embeddable: true });
+        if (privateStorePath(rootRealPath, safePath) && resolved === filePath) return json(response, 403, { error: 'Preservation internals are not media routes.' });
+        return await serveFile(request, response, safePath, 'private, max-age=3600', { embeddable: true, logicalFileName: relative });
       }
       response.writeHead(404, { ...SECURITY_HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end('Not found');
     } catch (error) {

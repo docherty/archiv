@@ -89,7 +89,7 @@ function assertNoTrackedPrivateArtifacts() {
     .filter((relativePath) => relativePath && existsSync(path.join(root, relativePath)));
   const forbidden = tracked.filter((relativePath) => (
     /(?:^|\/)\.DS_Store$/i.test(relativePath)
-    || /^(?:config(?:\.local)?\.json|archive|venice-archive|captures|raw-snapshots|raw-store|indexes|materialized-media|recovered-media|recovered-content)(?:\/|$)/i.test(relativePath)
+    || /^(?:config(?:\.local)?\.json|archive|venice-archive|captures|raw-snapshots|raw-store|asset-store|indexes|materialized-media|recovered-media|recovered-content)(?:\/|$)/i.test(relativePath)
     || /\.(?:zip|tar|tgz|7z|ldb|sqlite3?|pem|p12)$/i.test(relativePath)
   ));
   assert.deepEqual(forbidden, [], `Private or generated artifacts are tracked: ${forbidden.join(', ')}`);

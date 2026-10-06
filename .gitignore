@@ -22,6 +22,7 @@ __pycache__/
 /captures/
 /raw-snapshots/
 /raw-store/
+/asset-store/
 /indexes/
 /media/
 /materialized-media/

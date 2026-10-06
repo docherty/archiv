@@ -4,6 +4,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { correctMediaFileExtension, inspectMediaSignature, mediaExtensionsMatch } from './media-bytes.mjs';
 import { pathExists } from './util.mjs';
+import { assetResolver, resolveAssetPath } from './asset-store.mjs';
 
 const MEDIA_HEADER_BYTES = 128 * 1024;
 
@@ -78,7 +79,7 @@ async function inspectCatalogFile(filePath, fileName, mimeType, cache) {
   }
 }
 
-async function reconcileMediaFiles(items, cache) {
+async function reconcileMediaFiles(items, cache, archiveRoot) {
   const files = new Map();
   for (const item of items) {
     if (!item.available || !item.path || !item.archiveDirectory) continue;
@@ -94,7 +95,7 @@ async function reconcileMediaFiles(items, cache) {
   }
   for (const [filePath, linkedItems] of files) {
     const representative = linkedItems[0];
-    const result = await inspectCatalogFile(filePath, representative.fileName || representative.path, representative.mimeType, cache);
+    const result = await inspectCatalogFile(await resolveAssetPath(archiveRoot, filePath, representative.sha256), representative.fileName || representative.path, representative.mimeType, cache);
     for (const item of linkedItems) {
       if (!result.exists) {
         item.available = false;
@@ -251,7 +252,7 @@ async function captureOpfsSidecars(directory, manifest) {
   const sidecars = new Map();
   for (const item of manifest?.opfs || []) {
     if (!/^[a-f0-9]{64}\.meta$/i.test(String(item.fileName || '')) || !item.archivedPath) continue;
-    const metadata = await readJson(path.join(directory, item.archivedPath), null);
+    const metadata = await readJson(await resolveAssetPath(path.resolve(directory, '../..'), path.join(directory, item.archivedPath)), null);
     if (!metadata || !/^[a-f0-9]{64}$/i.test(String(metadata.hash || ''))) continue;
     const original = String(item.path || '').replaceAll('\\', '/');
     const target = path.posix.join(path.posix.dirname(original), String(metadata.hash));
@@ -449,6 +450,7 @@ export class ArchiveCatalog {
     this.messageMap = new Map();
     this.mediaMap = new Map();
     this.mediaInspectionCache = new Map();
+    this.legacyMediaById = new Map();
     this.favouriteKeys = new Set();
     this.hiddenMediaKeys = new Set();
     this.verifiedCapture = null;
@@ -625,7 +627,7 @@ export class ArchiveCatalog {
       messagesByConversation.get(message.conversationId).push(message);
     }
     const allMedia = [...mediaByKey.values()].filter((item) => !internalMediaSidecar(item));
-    await reconcileMediaFiles(allMedia, this.mediaInspectionCache);
+    await reconcileMediaFiles(allMedia, this.mediaInspectionCache, this.root);
     for (const item of allMedia) item.isThumbnail = thumbnailMedia(item);
     for (const item of allMedia) {
       if (!item.messageId || !item.conversationId) continue;
@@ -719,6 +721,13 @@ export class ArchiveCatalog {
     this.conversations = [...conversationMap.values()].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
     this.messages = messages;
     this.media = media.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const references = await assetResolver(this.root).load();
+    const legacyItems = references.legacy.map(({ id, original, path: originalPath, sha256, size }) => ({
+      ...original, id, mediaId: id, path: originalPath, sha256, bytes: size,
+      available: true, status: 'materialized', archiveSource: 'imported archive', archiveDirectory: this.root
+    }));
+    await reconcileMediaFiles(legacyItems, this.mediaInspectionCache, this.root);
+    this.legacyMediaById = new Map(legacyItems.map(item => [item.id, item]));
     this.loadedAt = new Date().toISOString();
     return this;
   }
@@ -759,7 +768,7 @@ export class ArchiveCatalog {
   }
 
   setMediaFavourite(id, favourite) {
-    const item = this.media.find((entry) => entry.id === String(id));
+    const item = this.media.find((entry) => entry.id === String(id)) || this.legacyMediaById.get(String(id));
     const key = this.favouriteKey(item);
     if (!item || !key) return null;
     if (favourite) this.favouriteKeys.add(key);
@@ -782,7 +791,7 @@ export class ArchiveCatalog {
   }
 
   setMediaHidden(id, hidden) {
-    const item = this.media.find((entry) => entry.id === String(id));
+    const item = this.media.find((entry) => entry.id === String(id)) || this.legacyMediaById.get(String(id));
     const key = this.favouriteKey(item);
     if (!item || !key) return null;
     if (hidden) this.hiddenMediaKeys.add(key);
@@ -860,7 +869,7 @@ export class ArchiveCatalog {
   }
 
   mediaItem(id) {
-    const item = this.media.find((entry) => entry.id === String(id));
+    const item = this.media.find((entry) => entry.id === String(id)) || this.legacyMediaById.get(String(id));
     return item ? this.publicMedia(item) : null;
   }
 

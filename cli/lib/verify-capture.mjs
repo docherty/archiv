@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
+import { resolveAssetPath } from './asset-store.mjs';
 
 async function hashAndCountLines(filePath) {
   const hash = createHash('sha256');
@@ -22,7 +23,7 @@ async function hashFile(filePath) {
   return { sha256: hash.digest('hex'), bytes: fileStat.size };
 }
 
-export async function verifyCapture(captureDirectory, { onProgress = () => {} } = {}) {
+export async function verifyCapture(captureDirectory, { onProgress = () => {}, writeReport = true } = {}) {
   const manifest = JSON.parse(await readFile(path.join(captureDirectory, 'capture.manifest.json'), 'utf8'));
   const errors = [];
   const stores = [];
@@ -43,7 +44,7 @@ export async function verifyCapture(captureDirectory, { onProgress = () => {} } 
   for (let index = 0; index < (manifest.opfs || []).length; index += 1) {
     const entry = manifest.opfs[index];
     try {
-      const result = await hashFile(path.join(captureDirectory, entry.archivedPath));
+      const result = await hashFile(await resolveAssetPath(path.resolve(captureDirectory, '../..'), path.join(captureDirectory, entry.archivedPath)));
       if (result.bytes !== entry.size) errors.push(`${entry.path}: expected ${entry.size} bytes but captured ${result.bytes}.`);
       opfs.push({ path: entry.path, archivedPath: entry.archivedPath, expectedBytes: entry.size, ...result });
     } catch (error) {
@@ -67,6 +68,6 @@ export async function verifyCapture(captureDirectory, { onProgress = () => {} } 
     opfs,
     errors
   };
-  await writeFile(path.join(captureDirectory, 'capture.verification.json'), `${JSON.stringify(report, null, 2)}\n`);
+  if (writeReport) await writeFile(path.join(captureDirectory, 'capture.verification.json'), `${JSON.stringify(report, null, 2)}\n`);
   return report;
 }
