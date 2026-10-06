@@ -45,6 +45,21 @@ npm run archive -- sync --archive "/path/to/Venice Archive" --allow-running
 
 Raw snapshots live under `raw-snapshots/`. Controlled captures live under `captures/`. Each capture is normalized and indexed after acquisition. Search queries the newest captures first and then the imported human-readable repository, removing duplicate results.
 
+### Optional managed cache for scheduled sync
+
+For a cloud-synced archive, keep raw browser working copies in a separate private local folder:
+
+```sh
+npm run archive -- sync --archive "/path/to/Venice Archive" --allow-running \
+  --snapshot-directory "/private/local/venice-snapshots" --snapshot-retain 2 --require-clone
+```
+
+This opt-in mode requires at least five GiB of free disk space before copying. macOS uses native `cp -c` clones: Node's best-effort FICLONE option silently makes full copies there. `--require-clone` refuses a full-copy fallback. Cache permissions are owner-only; paths overlapping the live browser data are rejected, including symlink aliases. A live journal rotation is reconciled, never accepted as a complete snapshot without a quiet matching inventory.
+
+Only explicitly managed, stable raw copies with a successful capture receipt are pruned, and only after successful extraction/verification and checkpointing. Two captured copies remain; incomplete or stable-but-not-yet-captured recovery copies are preserved. Historical `raw-snapshots/`, captures and media are untouched. To retry extraction from this cache, use `extract --snapshot "/full/path/to/snapshot-..."`; `latest` still refers to the archive's traditional raw directory. Default CLI/library archive layout is unchanged.
+
+A failed copy is removed with bounded retries. If cleanup itself fails (e.g. synced metadata recreates a directory), the original capture error is retained alongside the cleanup warning rather than replaced by `ENOTEMPTY`. Extraction setup failures also clean their disposable browser workspace.
+
 The `serve` command starts a private archive library on `127.0.0.1:43110`. It does not listen on the network and serves files only from the configured archive and its capture directories. The library includes complete conversation transcripts with inline attachments, clickable full-text search, a filterable media gallery, a full-screen keyboard-navigable viewer and archive-status details. Open **Sync archive**, then choose **Fetch new content** to run the same consistency-gated sync as the CLI, follow its progress and see exact counts for new images, video, audio, files, conversations and messages.
 
 The normal ongoing workflow is therefore:

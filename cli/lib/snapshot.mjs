@@ -1,7 +1,9 @@
 import { constants as fsConstants } from 'node:fs';
-import { cp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ensureDirectory, listFiles, pathExists, run, sha256File, timestampId } from './util.mjs';
+import { cleanupFailedSnapshot, prepareSnapshotCache } from './snapshot-cache.mjs';
+import { copySnapshotPath as cp } from './snapshot-copy.mjs';
 
 const PROFILE_PATHS = [
   'Preferences',
@@ -56,8 +58,8 @@ export async function saveSourceCheckpoint({ archiveDirectory, browser, profile,
   return checkpointPath;
 }
 
-async function latestReusableSnapshot(archiveDirectory, profileDirectory) {
-  const root = path.join(archiveDirectory, 'raw-snapshots');
+async function latestReusableSnapshot(archiveDirectory, profileDirectory, snapshotDirectory) {
+  const root = snapshotDirectory || path.join(archiveDirectory, 'raw-snapshots');
   let names = [];
   try {
     names = (await readdir(root, { withFileTypes: true }))
@@ -134,7 +136,7 @@ function consistencyDelta(sourceInventory, targetInventory, forcedPaths = []) {
   return changes;
 }
 
-async function applyConsistencyDelta(sourceProfile, targetProfile, sourceInventory, targetInventory, forcedPaths = []) {
+async function applyConsistencyDelta(sourceProfile, targetProfile, sourceInventory, targetInventory, forcedPaths = [], copyMode = fsConstants.COPYFILE_FICLONE) {
   const changes = consistencyDelta(sourceInventory, targetInventory, forcedPaths);
   let copiedFiles = 0;
   let removedFiles = 0;
@@ -151,7 +153,7 @@ async function applyConsistencyDelta(sourceProfile, targetProfile, sourceInvento
       await cp(path.join(sourceProfile, entry.path), target, {
         force: true,
         preserveTimestamps: true,
-        mode: fsConstants.COPYFILE_FICLONE
+        mode: copyMode
       });
       copiedFiles += 1;
     } catch (error) {
@@ -170,6 +172,7 @@ export async function reconcileConsistencySnapshot({
   browserName = 'the browser',
   maxPasses = LIVE_RECONCILIATION_PASSES,
   forcePaths = [],
+  copyMode = fsConstants.COPYFILE_FICLONE,
   onProgress = () => {}
 }) {
   let copiedFiles = 0;
@@ -195,7 +198,8 @@ export async function reconcileConsistencySnapshot({
       targetProfile,
       portableConsistencyInventory(sourceBefore),
       portableConsistencyInventory(targetBefore),
-      requiredPaths
+      requiredPaths,
+      copyMode
     );
     copiedFiles += applied.copiedFiles;
     removedFiles += applied.removedFiles;
@@ -231,27 +235,34 @@ export async function isBrowserRunning(browser) {
   }
 }
 
-export async function createRawSnapshot({ archiveDirectory, browser, profile, allowRunning = false, onProgress = () => {} }) {
+export async function createRawSnapshot({ archiveDirectory, browser, profile, allowRunning = false, snapshotDirectory = null, requireClone = false, minimumFreeBytes, onProgress = () => {} }) {
   const browserRunning = await isBrowserRunning(browser);
   if (!allowRunning && browserRunning) {
     throw new Error(`${browser.name} is running. Quit it before taking the raw safety snapshot so LevelDB and OPFS are internally consistent.`);
   }
 
   const snapshotId = `snapshot-${timestampId()}`;
-  const snapshotRoot = await ensureDirectory(path.join(archiveDirectory, 'raw-snapshots', snapshotId));
+  const cacheRoot = snapshotDirectory ? await prepareSnapshotCache(snapshotDirectory, browser.userDataDirectory, { minimumFreeBytes }) : null;
+  const copyMode = requireClone ? fsConstants.COPYFILE_FICLONE_FORCE : fsConstants.COPYFILE_FICLONE;
+  const snapshotRoot = await ensureDirectory(path.join(cacheRoot || path.join(archiveDirectory, 'raw-snapshots'), snapshotId));
   try {
     const consistencyBefore = await inventoryConsistencyFiles(profile.path, { precise: true });
     const userDataDirectory = await ensureDirectory(path.join(snapshotRoot, 'user-data'));
     const targetProfile = await ensureDirectory(path.join(userDataDirectory, profile.directoryName));
 
     const localState = path.join(browser.userDataDirectory, 'Local State');
-    if (await pathExists(localState)) await cp(localState, path.join(userDataDirectory, 'Local State'), { mode: fsConstants.COPYFILE_FICLONE });
+    if (await pathExists(localState)) await cp(localState, path.join(userDataDirectory, 'Local State'), { mode: copyMode });
 
     for (const relative of PROFILE_PATHS) {
       const source = path.join(profile.path, relative);
       if (!(await pathExists(source))) continue;
       onProgress(`Copying ${relative}`);
-      await cp(source, path.join(targetProfile, relative), { recursive: true, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE });
+      try {
+        await cp(source, path.join(targetProfile, relative), { recursive: true, preserveTimestamps: true, mode: copyMode });
+      } catch (error) {
+        if (!allowRunning || error.code !== 'ENOENT') throw error;
+        onProgress(`Live browser storage rotated while copying ${relative}; the consistency pass will repair the delta`);
+      }
     }
 
     onProgress('Checking that Venice storage stayed unchanged during the copy');
@@ -265,6 +276,7 @@ export async function createRawSnapshot({ archiveDirectory, browser, profile, al
       targetProfile,
       browserName: browser.name,
       forcePaths: firstPassChanges,
+      copyMode,
       onProgress
     });
     const consistencyAfter = result.inventory;
@@ -278,7 +290,8 @@ export async function createRawSnapshot({ archiveDirectory, browser, profile, al
     onProgress('Hashing snapshot files');
     const files = [];
     const snapshotFiles = await listFiles(userDataDirectory);
-    const reusableManifest = await latestReusableSnapshot(archiveDirectory, profile.directoryName);
+    const reusableManifest = await latestReusableSnapshot(archiveDirectory, profile.directoryName, cacheRoot)
+      || (cacheRoot ? await latestReusableSnapshot(archiveDirectory, profile.directoryName) : null);
     const reusableFiles = new Map((reusableManifest?.files || []).map((file) => [String(file.path), file]));
     const reusableSource = deserializeConsistencyInventory(reusableManifest?.sourceInventory);
     const profilePrefix = `${profile.directoryName}/`;
@@ -303,6 +316,8 @@ export async function createRawSnapshot({ archiveDirectory, browser, profile, al
     const manifest = {
       schemaVersion: 1,
       snapshotId,
+      ...(cacheRoot ? { managedCache: cacheRoot } : {}),
+      ...(requireClone ? { cloneRequired: true } : {}),
       createdAt: new Date().toISOString(),
       browser: { id: browser.id, name: browser.name, executable: browser.executable },
       profile: { directoryName: profile.directoryName, name: profile.name },
@@ -322,8 +337,7 @@ export async function createRawSnapshot({ archiveDirectory, browser, profile, al
     await writeFile(path.join(snapshotRoot, 'snapshot.manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     return { snapshotRoot, userDataDirectory, manifest };
   } catch (error) {
-    await rm(snapshotRoot, { recursive: true, force: true });
-    throw error;
+    return cleanupFailedSnapshot(snapshotRoot, error, { onProgress });
   }
 }
 

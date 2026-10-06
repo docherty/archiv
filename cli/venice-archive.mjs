@@ -12,6 +12,7 @@ import { materializeEmbeddedMedia } from './lib/materialize-media.mjs';
 import { startArchiveService } from './lib/service.mjs';
 import { verifyCapture } from './lib/verify-capture.mjs';
 import { formatBytes, parseArgs, pathExists } from './lib/util.mjs';
+import { markSnapshotCaptured, pruneSnapshotCache } from './lib/snapshot-cache.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -25,6 +26,7 @@ Usage:
   npm run archive -- snapshot --archive <folder> [--allow-running]
   npm run archive -- sync --archive <folder> [--allow-running]
   npm run archive -- extract --archive <folder> [--snapshot latest|<folder>]
+  # Optional sync cache: --snapshot-directory <private local folder> --snapshot-retain 2 --require-clone
   npm run archive -- import --archive <folder> --zip <archive.zip>
   npm run archive -- index --archive <folder>
   npm run archive -- search --archive <folder> <words> [--limit 25]
@@ -146,7 +148,8 @@ async function completeExtraction(setup, snapshotRoot, emit = () => {}, sourceCh
   };
 }
 
-async function syncArchive(setup, { allowRunning = false, emit = () => {} } = {}) {
+async function syncArchive(setup, { allowRunning = false, snapshotDirectory = null, requireClone = false, retainSnapshots = 2, emit = () => {} } = {}) {
+  if (snapshotDirectory && (!Number.isSafeInteger(retainSnapshots) || retainSnapshots < 2)) throw new Error('Keep at least two managed snapshots.');
   emit({ phase: 'discover', message: 'Checking for changes since the last verified update…' });
   const checkpoint = await sourceCheckpointStatus(setup);
   if (checkpoint.matches) {
@@ -156,9 +159,16 @@ async function syncArchive(setup, { allowRunning = false, emit = () => {} } = {}
     return { captureId: checkpoint.captureId, unchanged: true, checkpoint: true, checkedFiles: checkpoint.files };
   }
   if (checkpoint.available) emit({ phase: 'snapshot', message: `Venice storage changed in ${checkpoint.changes.length} place${checkpoint.changes.length === 1 ? '' : 's'}; saving the delta safely…` });
-  const snapshot = await createRawSnapshot({ ...setup, allowRunning, onProgress: (message) => { console.log(`[snapshot] ${message}`); emit({ phase: 'snapshot', message }); } });
+  const snapshot = await createRawSnapshot({ ...setup, allowRunning, snapshotDirectory, requireClone, onProgress: (message) => { console.log(`[snapshot] ${message}`); emit({ phase: 'snapshot', message }); } });
   const result = await completeExtraction(setup, snapshot.snapshotRoot, emit, checkpoint.changes);
   await saveSourceCheckpoint({ ...setup, snapshotManifest: snapshot.manifest, captureId: result.captureId });
+  if (snapshotDirectory) {
+    try {
+      await markSnapshotCaptured(snapshot.snapshotRoot, result.captureId);
+      const removed = await pruneSnapshotCache(snapshotDirectory, snapshot.snapshotRoot, retainSnapshots);
+      if (removed.length) console.log(`[snapshot] Pruned ${removed.length} superseded managed copies after verified capture; historical archive snapshots untouched`);
+    } catch (error) { console.warn(`[snapshot] Managed cache cleanup failed: ${error.message}`); }
+  }
   return result;
 }
 
@@ -199,7 +209,12 @@ async function main() {
 
   if (command === 'sync') {
     const setup = await resolveSetup(options);
-    await syncArchive(setup, { allowRunning: Boolean(options['allow-running']) });
+    await syncArchive(setup, {
+      allowRunning: Boolean(options['allow-running']),
+      snapshotDirectory: options['snapshot-directory'] ? required(options, 'snapshot-directory') : null,
+      requireClone: Boolean(options['require-clone']),
+      retainSnapshots: options['snapshot-retain'] === undefined ? 2 : Number(options['snapshot-retain'])
+    });
     return;
   }
 

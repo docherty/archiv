@@ -1,4 +1,4 @@
-import { createWriteStream } from 'node:fs';
+import { constants as fsConstants, createWriteStream } from 'node:fs';
 import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -97,18 +97,19 @@ async function latestVerifiedCapture(archiveDirectory) {
   return null;
 }
 
-async function cloneUserData(source, target) {
+async function cloneUserData(source, target, requireClone = false) {
   await ensureDirectory(target);
   if (process.platform === 'darwin') {
     try {
       await run('/bin/cp', ['-cR', `${source}/.`, target]);
       return;
-    } catch {
-      await rm(target, { recursive: true, force: true });
+    } catch (error) {
+      if (requireClone) throw error; // Never silently turn a cheap clone into a multi-GiB copy.
+      await rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 250 });
       await ensureDirectory(target);
     }
   }
-  await cp(source, target, { recursive: true, preserveTimestamps: true });
+  await cp(source, target, { recursive: true, preserveTimestamps: true, mode: requireClone ? fsConstants.COPYFILE_FICLONE_FORCE : fsConstants.COPYFILE_FICLONE });
 }
 
 function commandExpression(type, data = {}) {
@@ -195,11 +196,11 @@ export async function extractSnapshot({ snapshotRoot, archiveDirectory, browser,
   const runId = `capture-${timestampId()}`;
   const workRoot = await mkdtemp(path.join(os.tmpdir(), 'venice-archive-browser-'));
   const workUserData = path.join(workRoot, 'user-data');
-  onProgress('Creating an isolated working clone of the browser snapshot');
-  await cloneUserData(snapshotUserData, workUserData);
-
   let browserChild;
+  let client = null;
   try {
+    onProgress('Creating an isolated working clone of the browser snapshot');
+    await cloneUserData(snapshotUserData, workUserData, snapshotManifest.cloneRequired);
     browserChild = spawn(browser.executable, [
       '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-default-apps', '--disable-extensions',
       '--disable-background-networking', '--disable-component-update', '--disable-domain-reliability', '--disable-sync', '--metrics-recording-only',
@@ -210,13 +211,6 @@ export async function extractSnapshot({ snapshotRoot, archiveDirectory, browser,
       browserChild.once('spawn', resolve);
       browserChild.once('error', reject);
     });
-  } catch (error) {
-    browserChild?.kill('SIGTERM');
-    throw error;
-  }
-
-  let client = null;
-  try {
     const port = await waitForDevToolsPort(workUserData);
     const target = await findPageTarget(port);
     client = await new CdpClient(target.webSocketDebuggerUrl).connect();
@@ -275,12 +269,16 @@ export async function extractSnapshot({ snapshotRoot, archiveDirectory, browser,
     return { captureDirectory, manifest };
   } finally {
     client?.close();
-    if (browserChild && browserChild.exitCode === null) {
+    if (browserChild?.pid && browserChild.exitCode === null) {
       browserChild.kill('SIGTERM');
       await Promise.race([
         new Promise((resolve) => browserChild.once('exit', resolve)),
         new Promise((resolve) => setTimeout(resolve, 3000))
       ]);
+      if (browserChild.exitCode === null) {
+        browserChild.kill('SIGKILL');
+        await Promise.race([new Promise((resolve) => browserChild.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 1000))]);
+      }
     }
     try {
       await rm(workRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 250 });
