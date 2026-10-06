@@ -9,6 +9,7 @@ import { createRawSnapshot, saveSourceCheckpoint, sourceCheckpointStatus, verify
 import { extractSnapshot } from './lib/extract.mjs';
 import { normalizeCapture } from './lib/normalize-capture.mjs';
 import { materializeEmbeddedMedia } from './lib/materialize-media.mjs';
+import { maintainAssetStore } from './lib/asset-maintenance.mjs';
 import { startArchiveService } from './lib/service.mjs';
 import { verifyCapture } from './lib/verify-capture.mjs';
 import { formatBytes, parseArgs, pathExists } from './lib/util.mjs';
@@ -118,6 +119,7 @@ async function completeExtraction(setup, snapshotRoot, emit = () => {}, sourceCh
     }
   });
   if (capture.unchanged) {
+    await maintainAssetStore(setup.archiveDirectory, { onProgress: message => console.log(`[assets] ${message}`) });
     const message = `No record or media changes found; ${capture.plan.skippedStores} stores and ${capture.plan.skippedOpfs} media files already match the verified archive.`;
     console.log(message);
     emit({ phase: 'complete', message });
@@ -159,6 +161,7 @@ async function syncArchive(setup, { allowRunning = false, snapshotDirectory = de
   emit({ phase: 'discover', message: 'Checking for changes since the last verified update…' });
   const checkpoint = await sourceCheckpointStatus(setup);
   if (checkpoint.matches) {
+    await maintainAssetStore(setup.archiveDirectory, { onProgress: message => console.log(`[assets] ${message}`) });
     const message = `Up to date. ${checkpoint.files} Venice storage files are unchanged since the last verified update.`;
     console.log(message);
     emit({ phase: 'complete', message });

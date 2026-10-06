@@ -20,6 +20,7 @@ import base64
 import sys
 import tempfile
 import time
+import signal
 import uuid
 
 HERE = Path(__file__).resolve().parent
@@ -187,7 +188,11 @@ class Assets:
             raise ValueError('Asset pointer checksum mismatch')
         return tree
 
-    def read(self, identity):
+    def read(self, identity, merged=True, seen=None):
+        chain = set() if seen is None else set(seen)
+        if identity in chain or len(chain) >= 200:
+            raise ValueError('Asset tree cycle/depth limit; explicit checkpoint required')
+        chain.add(identity)
         tree_path, receipt_path = self.paths(identity)
         tree_path = real_path(self.archive, str(tree_path.relative_to(self.archive)))
         receipt_path = real_path(self.archive, str(receipt_path.relative_to(self.archive)))
@@ -218,14 +223,163 @@ class Assets:
             entry = next((e for e in tree['entries'] if e['path'] == item.get('path')), None)
             if not entry or item.get('sha256') != entry['sha256'] or item.get('size') != entry['size']:
                 raise ValueError('Invalid historical ID reference')
+        if merged and tree.get('baseTree'):
+            base = tree['baseTree']
+            parent, parent_receipt = self.read(base['tree'], seen=chain)
+            if base['sha256'] != parent_receipt['treeSha256']:
+                raise ValueError('Asset base tree checksum mismatch')
+            entries = {e['path']: e for e in parent['entries']}
+            entries.update({e['path']: e for e in tree['entries']})
+            tree = {**tree, 'entries': sorted(entries.values(), key=lambda e: e['path']),
+                    'directories': {**parent['directories'], **tree['directories']},
+                    'legacy': [*parent.get('legacy', []), *tree.get('legacy', [])]}
         return tree, receipt
 
-    def verify(self, identity):
-        tree, receipt = self.read(identity)
+    def verify(self, identity, merged=True):
+        tree, receipt = self.read(identity, merged=merged)
         self.pool.checked.clear()
         for entry in tree['entries']:
             self.pool.verify_object(entry['sha256'], entry['size'])
         return tree, receipt
+
+    def maintain(self, enable=False, seconds=20, max_files=128, max_bytes=1024 ** 3):
+        """Opt-in, bounded delta transaction; no full source/pool audit or no-op tree."""
+        policy_path = self.root / 'maintenance.json'
+        if enable:
+            current = self.current()
+            if not current or not self.read(current['tree'])[1].get('removalCompletedAt'):
+                raise RuntimeError('Enable maintenance only after approved baseline consolidation')
+            raw.atomic_json(policy_path, {'schema': SCHEMA, 'enabled': True})
+        if not policy_path.exists():
+            return {'maintenance': 'disabled', 'files': 0}
+        policy = load_json(policy_path)
+        if policy.get('schema') != SCHEMA or policy.get('enabled') is not True:
+            raise ValueError('Invalid maintenance policy')
+        if seconds <= 0 or max_files < 1 or max_bytes < 1:
+            raise ValueError('Invalid maintenance bounds')
+        deadline = time.monotonic() + seconds
+        def tick(*args):
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Asset maintenance deadline; originals retained for retry')
+        original_sha = raw.sha
+        def bounded_sha(path):
+            digest = hashlib.sha256()
+            with path.open('rb') as stream:
+                while True:
+                    tick()
+                    chunk = stream.read(1024 * 1024)
+                    if not chunk:
+                        return digest.hexdigest()
+                    digest.update(chunk)
+        raw.sha = bounded_sha
+        try:
+            previous = self.current()
+            if not previous:
+                raise RuntimeError('Maintenance lost its published baseline')
+            _, receipt = self.read(previous['tree'])
+            # Resume a published delta after proof failure/interrupted unlink, never
+            # grow another tree or discard the physical originals on every retry.
+            if previous.get('baseTree') and not receipt.get('removalCompletedAt'):
+                identity = previous['tree']
+                pending_files = 1  # Rescan additions on the next bounded pass after recovery.
+            else:
+                roots = ['media/sha256', 'materialized-media/media', 'recovered-media/media', 'recovered-content/media']
+                captures = self.archive / 'captures'
+                if captures.exists():
+                    real_path(self.archive, 'captures')
+                    for child in sorted(captures.iterdir()):
+                        tick()
+                        if child.is_symlink():
+                            raise ValueError('Unsafe capture directory')
+                        if child.is_dir() and (child / 'opfs').exists():
+                            roots.append(str((child / 'opfs').relative_to(self.archive)))
+                candidates = []
+                total = 0
+                pending_files = 0
+                for name in roots:
+                    tick()
+                    if not (self.archive / name).exists():
+                        continue
+                    root = real_path(self.archive, name)
+                    for parent, dirs, files in os.walk(root, followlinks=False):
+                        tick()
+                        for item in sorted(dirs + files):
+                            path = Path(parent) / item
+                            relative = path.relative_to(self.archive).as_posix()
+                            info = path.lstat()
+                            if stat.S_ISLNK(info.st_mode) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                                raise ValueError('Unsafe asset candidate; originals retained')
+                            if stat.S_ISREG(info.st_mode) and auditor.category(relative) == 'standalone-asset':
+                                if len(candidates) >= max_files or total + info.st_size > max_bytes:
+                                    pending_files += 1
+                                    continue
+                                candidates.append((relative, raw.signature(info)))
+                                total += info.st_size
+                if not candidates:
+                    if pending_files:
+                        raise RuntimeError('Asset exceeds automatic byte budget; explicit maintenance required')
+                    return {'maintenance': 'up-to-date', 'files': 0, 'newTree': False, 'hashedPayloadBytes': 0}
+                if shutil.disk_usage(self.archive).free < total + RESERVE:
+                    raise RuntimeError('Maintenance would cross the five-GiB free-space reserve')
+                entries, directories = {}, {}
+                old = {e['path']: e for e in previous['entries']}
+                new_bytes = 0
+                with tempfile.TemporaryDirectory(prefix='.maintenance-metadata-', dir=self.root) as tmp:
+                    scratch = Path(tmp)
+                    for name, signature in candidates:
+                        tick()
+                        path = real_path(self.archive, name)
+                        info = path.lstat()
+                        if raw.signature(info) != signature:
+                            raise RuntimeError('Asset changed during maintenance inventory')
+                        digest = raw.sha(path)
+                        if name in old and old[name]['sha256'] != digest:
+                            raise RuntimeError('Known logical path was overwritten; explicit version repair required')
+                        meta = raw.metadata(path, info, scratch)
+                        target = self.pool.object(digest)
+                        if not target.exists():
+                            new_bytes += info.st_size
+                        self.pool.put(path, digest, info.st_size, sys.platform == 'darwin')
+                        if raw.signature(path.lstat()) != signature:
+                            raise RuntimeError('Asset changed while preparing delta')
+                        entries[name] = {'path': name, 'type': 'file', 'sha256': digest, 'size': info.st_size,
+                                         'metadata': meta, 'sourceSignature': signature}
+                        for parent in path.parents:
+                            if parent == self.archive:
+                                break
+                            relative = parent.relative_to(self.archive).as_posix()
+                            if relative not in directories:
+                                real_path(self.archive, relative)
+                                directories[relative] = raw.metadata(parent, parent.lstat(), scratch)
+                tick()
+                identity = 'assets-' + uuid.uuid4().hex
+                tree = {'schema': SCHEMA, 'tree': identity, 'objects': '../raw-store/objects', 'createdAt': time.time(),
+                        'baseTree': {'tree': previous['tree'], 'sha256': receipt['treeSha256']},
+                        'previousTree': previous['tree'], 'recoveryTools': bundle_tools(self.root),
+                        'entries': sorted(entries.values(), key=lambda e: e['path']), 'directories': directories,
+                        'legacy': [], 'sourceContainerPolicy': 'unchanged', 'gc': 'none'}
+                tree_path, receipt_path = self.paths(identity)
+                raw.atomic_json(tree_path, tree)
+                os.chmod(tree_path, 0o400)
+                receipt = {'treeSha256': raw.sha(tree_path), 'preparedAt': time.time(), 'restoreProof': None,
+                           'removalStarted': False, 'sourceFiles': len(entries), 'newObjectBytes': new_bytes}
+                raw.atomic_json(receipt_path, receipt)
+                self.verify(identity, merged=False)
+                # Check the entire base chain before exposing the new generation.
+                self.read(identity)
+                raw.atomic_json(self.root / 'current.json', {'schema': SCHEMA, 'tree': identity, 'treeSha256': receipt['treeSha256']})
+            tick()
+            cache = Path(tempfile.gettempdir()) / 'archiv-asset-proofs'
+            cache.mkdir(mode=0o700, exist_ok=True)
+            if cache.is_symlink():
+                raise ValueError('Unsafe maintenance proof cache')
+            with tempfile.TemporaryDirectory(prefix='delta-', dir=cache) as tmp:
+                proof = self.proof(identity, Path(tmp) / 'view', cleanup=True, delta=True)
+            tick()
+            result = self.remove(identity, on_unlink=tick, delta=True)
+            return {**result, 'maintenance': 'consolidated', 'deltaProofFiles': proof['files'], 'newTree': True, 'pendingFiles': pending_files}
+        finally:
+            raw.sha = original_sha
 
     def prepare(self, seconds=300):
         previous = self.current()
@@ -337,8 +491,8 @@ class Assets:
         return {'tree': identity, 'paths': len(entries), 'aliases': sum(e['type'] == 'alias' for e in entries.values()),
                 'newObjectBytes': new_bytes, 'prepared': True, 'sourceFilesRemoved': 0}
 
-    def restore(self, identity, destination, portable=False, prefix=''):
-        tree, receipt = self.verify(identity)
+    def restore(self, identity, destination, portable=False, prefix='', delta=False):
+        tree, receipt = self.verify(identity, merged=not delta)
         if prefix:
             raw.safe_path(prefix)
         entries = [e for e in tree['entries'] if not prefix or e['path'].startswith(prefix + '/') or e['path'] == prefix]
@@ -380,9 +534,9 @@ class Assets:
                 'aliases': sum(e['type'] == 'alias' for e in entries), 'bytes': sum(e['size'] for e in entries),
                 'destination': str(destination), 'metadataRestore': 'posix-only' if portable else 'native'}
 
-    def proof(self, identity, destination, cleanup=False):
-        result = self.restore(identity, destination)
-        tree, receipt = self.read(identity)
+    def proof(self, identity, destination, cleanup=False, delta=False):
+        result = self.restore(identity, destination, delta=delta)
+        tree, receipt = self.read(identity, merged=not delta)
         provenance_rebindings = []
         with tempfile.TemporaryDirectory(prefix='.proof-metadata-', dir=self.root) as temporary:
             scratch = Path(temporary)
@@ -406,19 +560,19 @@ class Assets:
                                                    'original': original_id, 'restored': restored_id,
                                                    'originalCompleteMetadataRetained': True})
         result['metadataRestore'] = 'native-with-recorded-provenance-rebinding' if provenance_rebindings else 'native'
-        raw.atomic_json(self.paths(identity)[1], {**receipt, 'restoreProof': {'verifiedAt': time.time(),
+        raw.atomic_json(self.paths(identity)[1], {**receipt, ('deltaRestoreProof' if delta else 'restoreProof'): {'verifiedAt': time.time(),
                         'treeSha256': receipt['treeSha256'], 'metadataRestore': 'native-with-recorded-provenance-rebinding' if provenance_rebindings else 'native', 'files': result['files'],
                         'bytes': result['bytes'], 'nativeDirectoryMetadataVerified': len(tree['directories']), 'provenanceRebindings': provenance_rebindings, 'metadataProofPolicy': 'only-8-byte-provenance-id-v1'}})
         if cleanup:
             shutil.rmtree(destination)  # Only the new isolated directory created by restore above.
         return {**result, 'restoreProof': True, 'temporaryRestoreRemoved': cleanup, 'metadataProofPolicy': 'only-8-byte-provenance-id-v1', 'provenanceRebindings': len(provenance_rebindings)}
 
-    def remove(self, identity, on_unlink=lambda count: None):
-        tree, receipt = self.verify(identity)  # Fresh independent object pass at destructive boundary.
+    def remove(self, identity, on_unlink=lambda count: None, delta=False):
+        tree, receipt = self.verify(identity, merged=not delta)  # Fresh independent object pass at destructive boundary.
         current = self.current()
         if not current or current['tree'] != identity:
             raise RuntimeError('Only the published current tree can be consolidated')
-        proof = receipt.get('restoreProof') or {}
+        proof = receipt.get('deltaRestoreProof' if delta else 'restoreProof') or {}
         if proof.get('treeSha256') != receipt['treeSha256'] or proof.get('files') != len(tree['entries']) or proof.get('metadataRestore') not in ('native', 'native-with-recorded-provenance-rebinding') or proof.get('metadataProofPolicy') != 'only-8-byte-provenance-id-v1':
             raise RuntimeError('Full native restore proof is required before removal')
         remaining = []
@@ -458,6 +612,11 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     prepare = sub.add_parser('prepare')
     prepare.add_argument('--deadline-seconds', type=float, default=300)
+    maintain = sub.add_parser('maintain')
+    maintain.add_argument('--enable', action='store_true')
+    maintain.add_argument('--deadline-seconds', type=float, default=20)
+    maintain.add_argument('--max-files', type=int, default=128)
+    maintain.add_argument('--max-bytes', type=int, default=1024 ** 3)
     verify = sub.add_parser('verify')
     verify.add_argument('--tree')
     restore = sub.add_parser('restore')
@@ -472,10 +631,16 @@ def main():
     remove = sub.add_parser('remove')
     remove.add_argument('--tree')
     args = parser.parse_args()
+    if args.command == 'maintain':
+        def interrupted(signum, frame):
+            raise TimeoutError('Asset maintenance interrupted; originals retained')
+        signal.signal(signal.SIGTERM, interrupted)
     assets = Assets(args.archive, create=args.command == 'prepare')
     with assets.pool.lock():
         if args.command == 'prepare':
             result = assets.prepare(args.deadline_seconds)
+        elif args.command == 'maintain':
+            result = assets.maintain(args.enable, args.deadline_seconds, args.max_files, args.max_bytes)
         else:
             identity = args.tree or (assets.current() or {}).get('tree')
             if not identity:

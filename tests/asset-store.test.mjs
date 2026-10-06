@@ -10,6 +10,7 @@ import { ArchiveCatalog } from '../cli/lib/catalog.mjs';
 import { startArchiveService } from '../cli/lib/service.mjs';
 import { verifyCapture } from '../cli/lib/verify-capture.mjs';
 import { materializeEmbeddedMedia } from '../cli/lib/materialize-media.mjs';
+import { maintainAssetStore } from '../cli/lib/asset-maintenance.mjs';
 
 const script = new URL('../scripts/asset-store.py', import.meta.url).pathname;
 const python = process.env.ARCHIV_PYTHON || 'python3';
@@ -268,6 +269,118 @@ test('validly checksummed but unsafe tree paths/directories and missing publishe
   await assert.rejects(new AssetResolver(root).load(), /lost its published pointer/);
   cli(root, ['prepare'], false);
   assert.deepEqual(await readFile(path.join(root, original)), png);
+}));
+
+test('the actual materializer and no-op maintenance hook keep new media in the shared pool', async () => fixture(async ({ parent, root }) => {
+  cli(root, ['prepare']); cli(root, ['proof', '--destination', path.join(parent, 'proof'), '--cleanup']); cli(root, ['remove']);
+  cli(root, ['maintain', '--enable']);
+  const captureRoot = path.join(root, 'captures', captureId);
+  const manifestFile = path.join(captureRoot, 'capture.manifest.json');
+  const manifest = JSON.parse(await readFile(manifestFile));
+  manifest.stores.push({ name: 'messageImages', path: 'stores/images.jsonl', records: 1 });
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  const bytes = Buffer.concat([png, Buffer.from('new retained version')]);
+  await put(root, `captures/${captureId}/stores/images.jsonl`, JSON.stringify({ id: 'new-image', contentBinary: bytes.toString('base64') })+'\n');
+  await verifyCapture(captureRoot);
+  const result = await materializeEmbeddedMedia(root);
+  assert.equal(result.added, 1);
+  const index = JSON.parse(await readFile(path.join(root, 'materialized-media/indexes/media.json')));
+  const file = path.join(root, 'materialized-media', index.items[0].path);
+  await assert.rejects(readFile(file), /ENOENT/);
+  assert.deepEqual(await readFile(await resolveAssetPath(root, file)), bytes);
+  assert.equal((await maintainAssetStore(root)).maintenance, 'up-to-date');
+}));
+
+test('interrupted delta unlink retries without another generation and retains later additions', async () => fixture(async ({ parent, root }) => {
+  cli(root, ['prepare']); cli(root, ['proof', '--destination', path.join(parent, 'proof'), '--cleanup']); cli(root, ['remove']);
+  cli(root, ['maintain', '--enable']);
+  await put(root, 'media/sha256/aa/one.bin', 'one'); await put(root, 'media/sha256/bb/two.bin', 'two');
+  const source = `import importlib.util\ns=importlib.util.spec_from_file_location('assets',${JSON.stringify(script)})\nm=importlib.util.module_from_spec(s);s.loader.exec_module(m)\na=m.Assets(${JSON.stringify(root)})\noriginal=a.remove\ndef interrupt(identity,**kwargs):\n def stop(count):raise RuntimeError('injected interrupted unlink')\n return original(identity,on_unlink=stop,delta=True)\na.remove=interrupt\nwith a.pool.lock():a.maintain()\n`;
+  assert.notEqual(spawnSync(python, ['-c', source]).status, 0);
+  const pointer = await readFile(path.join(root, 'asset-store/current.json'));
+  const later = await put(root, 'media/sha256/cc/three.bin', 'three');
+  assert.equal(cli(root, ['maintain']).removedFiles, 1);
+  assert.deepEqual(await readFile(path.join(root, 'asset-store/current.json')), pointer);
+  assert.equal(await readFile(later, 'utf8'), 'three');
+  assert.equal(cli(root, ['maintain']).removedFiles, 1);
+}));
+
+test('opt-in maintenance writes only small deltas, preserves the baseline and makes unchanged checks true no-ops', async () => fixture(async ({ parent, root, original, stale }) => {
+  cli(root, ['prepare']);
+  cli(root, ['maintain', '--enable'], false); // Preparation is not baseline removal approval.
+  cli(root, ['proof', '--destination', path.join(parent, 'proof'), '--cleanup']);
+  cli(root, ['remove']);
+  const base = JSON.parse(await readFile(path.join(root, 'asset-store/current.json')));
+  assert.equal(cli(root, ['maintain']).maintenance, 'disabled');
+  assert.equal(cli(root, ['maintain', '--enable']).newTree, false);
+  const name = 'captures/capture-2026-02-01T00-00-00-000Z/opfs/media/new.png';
+  await put(root, name, png);
+  const result = cli(root, ['maintain']);
+  assert.equal(result.removedFiles, 1);
+  assert.equal(result.deltaProofFiles, 1);
+  const pointer = await readFile(path.join(root, 'asset-store/current.json'));
+  const leaf = JSON.parse(await readFile(path.join(root, 'asset-store/trees', `${result.tree}.json`)));
+  assert.equal(leaf.entries.length, 1);
+  assert.equal(leaf.baseTree.tree, base.tree);
+  const resolver = await new AssetResolver(root).load();
+  assert.equal(resolver.entries.size, 5);
+  for (const item of [name, original, stale]) assert.deepEqual(await readFile(await resolver.resolve(path.join(root, item))), png);
+  const before = await readdir(path.join(root, 'asset-store/trees'));
+  assert.equal(cli(root, ['maintain']).hashedPayloadBytes, 0);
+  assert.deepEqual(await readFile(path.join(root, 'asset-store/current.json')), pointer);
+  assert.deepEqual(await readdir(path.join(root, 'asset-store/trees')), before);
+  const restored = path.join(parent, 'after-delta');
+  execFileSync(python, [path.join(root, 'asset-store/tools', leaf.recoveryTools, 'asset-store.py'), '--archive', root, 'restore', '--tree', result.tree, '--destination', restored]);
+  assert.deepEqual(await readFile(path.join(restored, name)), png);
+  assert.deepEqual(await readFile(path.join(restored, original)), png);
+}));
+
+test('bounded maintenance drains batches and never duplicates old metadata or deletes over-budget files', async () => fixture(async ({ parent, root }) => {
+  cli(root, ['prepare']); cli(root, ['proof', '--destination', path.join(parent, 'proof'), '--cleanup']); cli(root, ['remove']);
+  cli(root, ['maintain', '--enable']);
+  await put(root, 'media/sha256/aa/a.bin', 'a');
+  await put(root, 'media/sha256/bb/b.bin', 'b');
+  const one = cli(root, ['maintain', '--max-files', '1']);
+  assert.equal(one.removedFiles, 1); assert.equal(one.pendingFiles, 1);
+  assert.equal(cli(root, ['maintain']).removedFiles, 1);
+  assert.equal(cli(root, ['maintain']).newTree, false);
+  const large = await put(root, 'media/sha256/cc/large.bin', 'too large');
+  const pointer = await readFile(path.join(root, 'asset-store/current.json'));
+  cli(root, ['maintain', '--max-bytes', '1'], false);
+  assert.deepEqual(await readFile(path.join(root, 'asset-store/current.json')), pointer);
+  assert.equal(await readFile(large, 'utf8'), 'too large');
+}));
+
+test('failed delta proof resumes the same generation with all originals retained', async () => fixture(async ({ parent, root }) => {
+  cli(root, ['prepare']); cli(root, ['proof', '--destination', path.join(parent, 'proof'), '--cleanup']); cli(root, ['remove']);
+  cli(root, ['maintain', '--enable']);
+  const name = 'media/sha256/aa/later.bin'; const file = await put(root, name, 'later');
+  const source = `import importlib.util\ns=importlib.util.spec_from_file_location('assets',${JSON.stringify(script)})\nm=importlib.util.module_from_spec(s);s.loader.exec_module(m)\na=m.Assets(${JSON.stringify(root)})\ndef fail(*args,**kwargs):raise RuntimeError('injected proof failure')\na.proof=fail\nwith a.pool.lock():a.maintain()\n`;
+  assert.notEqual(spawnSync(python, ['-c', source]).status, 0);
+  assert.equal(await readFile(file, 'utf8'), 'later');
+  const pointer = await readFile(path.join(root, 'asset-store/current.json'));
+  assert.equal(cli(root, ['maintain']).removedFiles, 1);
+  assert.deepEqual(await readFile(path.join(root, 'asset-store/current.json')), pointer);
+  assert.equal(cli(root, ['maintain']).newTree, false);
+}));
+
+test('maintenance rejects changed known paths, deadlines and unsafe base chains without unlink', async () => fixture(async ({ parent, root, original }) => {
+  cli(root, ['prepare']); cli(root, ['proof', '--destination', path.join(parent, 'proof'), '--cleanup']); cli(root, ['remove']);
+  cli(root, ['maintain', '--enable']);
+  const file = await put(root, original, 'unexpected changed bytes');
+  cli(root, ['maintain'], false);
+  assert.equal(await readFile(file, 'utf8'), 'unexpected changed bytes');
+  await rm(file);
+  const late = await put(root, 'media/sha256/aa/late.bin', 'late');
+  cli(root, ['maintain', '--deadline-seconds', '0.000001'], false);
+  assert.equal(await readFile(late, 'utf8'), 'late');
+  const delta = cli(root, ['maintain']);
+  const leafPath = path.join(root, 'asset-store/trees', `${delta.tree}.json`);
+  const leaf = JSON.parse(await readFile(leafPath));
+  const parentPath = path.join(root, 'asset-store/trees', `${leaf.baseTree.tree}.json`);
+  await chmod(parentPath, 0o600); await writeFile(parentPath, '{}');
+  await assert.rejects(new AssetResolver(root).load(), /checksum/);
+  cli(root, ['verify'], false);
 }));
 
 test('native proof normalization permits only the observed provenance ID, never flags, other attrs or forks', () => {

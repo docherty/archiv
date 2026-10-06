@@ -41,4 +41,19 @@ Catalog, media/file/download routes, HEAD/ranges, sidecar normalisation, capture
 
 Finder/reveal creates an explicit independent working copy outside the archive rather than exposing an editable canonical object. Existing filesystem-only consumers/static viewers must use a **restored working view**; logical paths are not promised to exist as physical files in the consolidated root. Include the shared pool, trees, receipts and tools when transferring the archive. The earlier duplication auditor measures physical layout; its missing-path check is not a logical-store verification after migration—use the reference-aware verify/restore commands.
 
-New unknown content is preserved by ordinary capture/materialisation. Same-byte materialisation of already referenced content does not recreate duplicate physical assets. **Automatic incremental asset consolidation is not installed**: collecting future new files remains a separately approved prepare/proof/remove operation. A same-disk store or working view is not an independent backup.
+## Opt-in incremental maintenance
+
+After explicitly approving and completing the baseline consolidation, enable bounded upkeep:
+
+```sh
+npm run assets -- --archive /path/to/archive maintain --enable
+npm run assets -- --archive /path/to/archive maintain
+```
+
+Sync (including unchanged-checkpoint/comparison paths), materialisation and library startup now invoke maintenance **only when this archive has an enabled policy**. Default bounds: 20 seconds, 128 files and 1 GiB of restored payload per pass, with a five-GiB free-space floor. Larger backlogs drain across passes; pending work or oversized single files is visible as an error/attention state, never a false complete success. The manual command accepts `--deadline-seconds`, `--max-files` and `--max-bytes` for explicit larger maintenance.
+
+Only physical files under the existing asset allowlist are examined; source JSON/JSONL and the full raw pool are not rehashed every cycle. An unchanged pass writes no tree/pointer and hashes no payload bytes. New generations store **only new origin/path metadata**, checksum-linking their immutable base, rather than repeating every old file/metadata record. Readers and independent restore validate/fold the entire base chain. New unique content and historical metadata legitimately grow; duplicate full byte copies and no-op metadata generations do not.
+
+Each batch gets its own native restore proof and separate `deltaRestoreProof` receipt (not falsely labelled a fresh full-archive proof). Source signatures/SHA and batch objects are rechecked immediately before individual unlink. Failed proof/interrupted removal retries the same published generation, preserving remaining originals and later additions. Unknown changed bytes at an already referenced immutable path stop for explicit version repair. Proof scratch is private/bounded and cleaned on normal failure/SIGTERM. A chain depth limit of 200 fails visibly and requires an explicit prepare/proof checkpoint; no silent pruning/GC or lossy retention is introduced.
+
+New unknown content remains preserved by capture/materialisation. Same-byte materialisation of already referenced content does not recreate duplicate physical assets. Explicit editable working views/exports are not automatically deleted. A same-disk store or working view is not an independent backup.

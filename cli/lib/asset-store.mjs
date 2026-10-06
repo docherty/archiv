@@ -30,6 +30,28 @@ async function noSymlinkPath(root, relative) {
   return current;
 }
 
+async function readGeneration(root, identity, expectedHash, seen = new Set()) {
+  if (!ID.test(identity) || !SHA.test(expectedHash) || seen.has(identity) || seen.size >= 200) throw new Error('Invalid/cyclic asset base chain');
+  seen.add(identity);
+  const bytes = await readFile(await noSymlinkPath(root, `asset-store/trees/${identity}.json`));
+  const receipt = JSON.parse(await readFile(await noSymlinkPath(root, `asset-store/receipts/${identity}.json`)));
+  if (digest(bytes) !== expectedHash || receipt.treeSha256 !== expectedHash) throw new Error('Asset tree checksum mismatch');
+  const tree = JSON.parse(bytes);
+  if (tree.schema !== SCHEMA || tree.tree !== identity || tree.objects !== '../raw-store/objects' || !Array.isArray(tree.entries)) throw new Error('Unsupported asset tree');
+  const own = new Map();
+  for (const entry of tree.entries) {
+    if (!assetPathAllowed(entry.path) || own.has(entry.path) || !['file', 'alias'].includes(entry.type) || !SHA.test(entry.sha256) || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error('Invalid asset entry');
+    own.set(entry.path, entry);
+  }
+  for (const item of tree.legacy || []) {
+    const entry = own.get(item.path);
+    if (!entry || item.sha256 !== entry.sha256 || item.size !== entry.size) throw new Error('Invalid legacy asset association');
+  }
+  const base = tree.baseTree ? await readGeneration(root, tree.baseTree.tree, tree.baseTree.sha256, seen) : { entries: new Map(), legacy: [] };
+  for (const [key, entry] of own) base.entries.set(key, entry);
+  return { entries: base.entries, legacy: [...base.legacy, ...(tree.legacy || [])] };
+}
+
 export class AssetResolver {
   constructor(archive) {
     this.root = path.resolve(archive);
@@ -57,26 +79,12 @@ export class AssetResolver {
     if (this.pointerStamp === stamp(info)) return this;
     const pointer = JSON.parse(await readFile(current));
     if (pointer.schema !== SCHEMA || !ID.test(pointer.tree) || !SHA.test(pointer.treeSha256)) throw new Error('Invalid asset pointer');
-    const treePath = await noSymlinkPath(this.root, `asset-store/trees/${pointer.tree}.json`);
-    const receiptPath = await noSymlinkPath(this.root, `asset-store/receipts/${pointer.tree}.json`);
-    const bytes = await readFile(treePath);
-    const receipt = JSON.parse(await readFile(receiptPath));
-    if (digest(bytes) !== pointer.treeSha256 || receipt.treeSha256 !== pointer.treeSha256) throw new Error('Asset tree checksum mismatch');
-    const tree = JSON.parse(bytes);
-    if (tree.schema !== SCHEMA || tree.tree !== pointer.tree || tree.objects !== '../raw-store/objects' || !Array.isArray(tree.entries)) throw new Error('Unsupported asset tree');
-    const entries = new Map();
-    for (const entry of tree.entries) {
-      if (!assetPathAllowed(entry.path) || entries.has(entry.path) || !['file', 'alias'].includes(entry.type) || !SHA.test(entry.sha256) || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error('Invalid asset entry');
-      entries.set(entry.path, entry);
-    }
-    for (const item of tree.legacy || []) {
-      const entry = entries.get(item.path);
-      if (!entry || item.sha256 !== entry.sha256 || item.size !== entry.size) throw new Error('Invalid legacy asset association');
-    }
+    const generation = await readGeneration(this.root, pointer.tree, pointer.treeSha256);
+    const entries = generation.entries;
     // A changed tree is never combined with a pointer from a different generation.
     if (stamp(await lstat(current)) !== stamp(info)) throw new Error('Asset pointer changed while loading');
     this.entries = entries;
-    this.legacy = tree.legacy || [];
+    this.legacy = generation.legacy;
     this.pointerStamp = stamp(info);
     return this;
   }

@@ -6,6 +6,7 @@ import readline from 'node:readline';
 import { correctMediaFileExtension, decodeBinaryPayload, inspectMedia } from './media-bytes.mjs';
 import { pathExists, sha256File } from './util.mjs';
 import { resolveAssetPath } from './asset-store.mjs';
+import { maintainAssetStore } from './asset-maintenance.mjs';
 
 function unwrap(record) {
   let value = record;
@@ -196,6 +197,7 @@ export async function materializeEmbeddedMedia(archiveDirectory, { apply = true,
   if (apply && needsLayerVerification) verifiedPreviousTotals = await verifyLayerFiles(layerRoot, previousDocument.items, onProgress);
   if (!pending.length) {
     if (apply && verifiedPreviousTotals) await atomicWrite(manifestPath, `${JSON.stringify(materializationManifest(previousDocument.items, processed, verifiedPreviousTotals), null, 2)}\n`);
+    if (apply) await maintainAssetStore(archiveRoot, { onProgress });
     return { mode: apply ? 'up-to-date' : 'dry-run', captures: captures.length, stores: 0, records: 0, payloads: 0, added: 0, bytes: 0, total: previousDocument.items?.length || 0 };
   }
 
@@ -300,6 +302,7 @@ export async function materializeEmbeddedMedia(archiveDirectory, { apply = true,
       files: uniqueFiles.size,
       bytes: [...uniqueFiles.values()].reduce((total, item) => total + Number(item.bytes || 0), 0)
     }), null, 2)}\n`);
+    await maintainAssetStore(archiveRoot, { onProgress });
   }
   return { mode: apply ? 'applied' : 'dry-run', captures: captures.length, stores: pending.length, records, payloads, added, bytes: bytesAdded, total: items.size };
 }
