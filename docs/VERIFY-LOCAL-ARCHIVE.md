@@ -1,5 +1,26 @@
 # Verify a Local Venice Archive Repository
 
+## Current CLI archives and shared stores
+
+For archives created by the standalone CLI, verify the relevant layers separately:
+
+```sh
+npm run archive -- verify-capture --archive /path/to/archive --capture latest
+npm run archive -- verify-history --archive /path/to/archive
+# Only for an archive with a prepared shared asset store:
+npm run assets -- --archive /path/to/archive verify
+# Full asset-byte/native-metadata restore proof into a new private directory:
+npm run assets -- --archive /path/to/archive proof --destination /private/new-proof --cleanup
+```
+
+Capture verification checks a selected capture, not every historical capture. Raw-history verification checks all committed raw trees; asset verification checks logical paths and their shared objects. None proves remote-account completeness, independently backed-up data or readable coverage of unknown record types. Supplement checksums with real restore tests and human spot checks.
+
+After opt-in asset consolidation, the library and verifier resolve logical media paths; physical `media/` or capture `opfs/` files may no longer exist. The physical duplicate audit can therefore report missing paths even for a valid logical store. Filesystem-only viewers need an independently restored working layout; asset restoration alone does not copy the source indexes/viewer. See [shared asset recovery and maintenance](shared-asset-store.md) and [raw history](archive-preservation.md). Do not apply legacy incremental ZIPs to a consolidated root without validating/restoring the intended layout.
+
+## Legacy extension-generated packages
+
+The following checklist is for the optional extension's readable folder/ZIP format, not the complete standalone CLI/raw-history verification procedure.
+
 Use this checklist after creating or updating a local archive repository from the backup console. The normal verification path does not require a local server.
 
 When folder access is available, choose the archive location once in the console, use `Create full archive` for the first run, and use `Sync now` thereafter. The saved handle is an access convenience only; the repository manifest and files remain the durable source of truth. `Verify archive` performs a quick in-console checkpoint, while the command below performs the full file-level audit.

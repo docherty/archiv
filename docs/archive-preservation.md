@@ -1,8 +1,8 @@
 # Preservation, not a pile of backups
 
-Archiv's primary job is to preserve captured Venice material for future uses,
-including uses its current decoders and search tools cannot anticipate. Global
-Memory is one consumer of the archive, not its owner or its definition.
+Archiv preserves captured Venice material for future uses, including uses its
+current decoders and search tools cannot anticipate. Search indexes and external
+consumers do not determine which original evidence is retained.
 
 ## Three deliberately separate layers
 
@@ -14,7 +14,7 @@ Memory is one consumer of the archive, not its owner or its definition.
    decoder to be understandable. Keep the existing extracted captures and recovery
    material; do not trade them away for the raw store.
 3. **Disposable views:** current conversation Markdown, search databases, embeddings,
-   thumbnails and Global Memory's redacted exports. These can be rebuilt; they must
+   thumbnails and downstream redacted exports. These can be rebuilt; they must
    never be the only copy of a conversation or the criterion for pruning evidence.
 
 These are representations, not permission to make a new full backup every update.
@@ -46,11 +46,11 @@ resource forks. Restore applies native extended metadata, permissions and access
 modification timestamps. Historical ownership, creation/change times and provider/
 immutable flags remain recorded, but are not forced onto a new host; in particular
 restores never recreate a dataless placeholder flag. This is exact-byte preservation,
-not a promise to reproduce filesystem inode identities or OS-bound login sessions.
+not a promise to reproduce inode identities, host-bound security attributes or login sessions.
 
 The SHA-256 object names and JSON trees are enough to recover bytes with any future
 language. Python 3.9+ provides the maintained tools; no database, model, network,
-Global Memory installation or Venice login is needed to verify or reconstruct them.
+search/index installation or Venice login is needed to verify or reconstruct them.
 A `--portable` restore provides bytes/POSIX metadata on other operating systems;
 macOS-specific metadata remains in the tree for native restoration later.
 
@@ -96,10 +96,10 @@ complete archived source temporarily and clean up that reconstruction afterward.
 Incomplete historical copies remain preserved and explicitly labelled incomplete;
 they are not chosen as a known-consistent latest source.
 
-The cumulative Markdown exporter overlays legacy indexes and **every verified
-capture delta**, oldest to newest, by `(conversationId, messageId)`. An empty newest
-capture cannot erase history. This is a derived historical-union view; original
-message revisions remain in untouched captures/raw history.
+Downstream exporters can build historical-union views from legacy indexes and
+verified capture deltas. Such derived views must not replace the preservation
+layer or discard source revisions when newer captures omit them. Archiv retains
+original revisions in captures/raw history; it does not require an external exporter.
 
 ## Verification and recovery
 
@@ -125,7 +125,7 @@ old archive requires explicit permission for source removal; `ingest` without
 measure actual free-space change, accounting for clones, cloud hydration and other
 concurrent activity.
 
-## One real backup, not sixty same-disk replicas
+## Independent backup and integrity
 
 Keep one canonical archive. Optionally keep **one independently recoverable backup**
 on another encrypted device or a versioned backup system, updated incrementally.
@@ -148,11 +148,12 @@ or media that were already missing before capture. OS-bound browser encryption m
 need the original host/keychain; readable extracted records and media reduce that
 risk. Older data already absent before this migration cannot be recreated by dedup.
 
-Existing decoded media/capture copies have not been deleted or globally reorganized.
-A read-only exact-byte inventory is available: see [payload-duplicate-audit.md](payload-duplicate-audit.md).
-Use independently verified overlap with the existing raw byte pool when designing
-canonical asset references and compatible readers; do not create a second permanent
-copy of bytes already preserved. An audit is not a removal receipt or authorization.
+Existing decoded assets are not converted automatically. A read-only physical
+inventory is available in [payload-duplicate-audit.md](payload-duplicate-audit.md);
+opt-in logical references, restore proofs and bounded maintenance are documented in
+[shared-asset-store.md](shared-asset-store.md). The asset store shares the existing raw
+byte pool, retaining per-origin metadata. An audit is not a removal authorization.
+Consolidation does not rewrite source JSON/JSONL containers or raw history.
 Never infer identity from message IDs, filenames, sampled edges or lower-resolution previews.
 Chunks inside changing LevelDB files may still repeat: whole-file SHA dedup does not
 pretend to be record/chunk-level dedup. Add such optimization only with separately

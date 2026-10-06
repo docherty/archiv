@@ -4,6 +4,10 @@ Standalone extracted assets can reference the **existing** immutable `raw-store/
 
 `asset-store/trees/<id>.json` is an immutable logical path tree, retaining every observed file's SHA/size, original path, provenance and POSIX/native metadata. Historical missing paths are explicit aliases backed by independently verified content. `current.json` atomically publishes a checksum-bound tree; separate receipts record proof/removal progress. Old trees are not overwritten. Same bytes from different origins have **separate metadata**, including distinct resource forks.
 
+## Before migration
+
+This is an opt-in format/layout change, not a default cleanup job. Stop Archiv library processes and scheduled writers first; check free space and retain an independently recoverable backup of irreplaceable data. Keep the whole archive private: paths, provenance and native metadata may be sensitive even when file contents are shared by hash. Update other readers before removing physical assets.
+
 ## Operations
 
 ```sh
@@ -25,7 +29,7 @@ Each tree pins recovery code and its AGPL license in `asset-store/tools/<digest>
   --archive /path/to/archive restore --tree <tree-id> --destination /new/outside-directory
 ```
 
-This does not require Venice, a browser, Node, QMD or Global Memory. On a non-macOS host, use `--portable`: restored bytes/POSIX modes/times do not constitute native ACL/xattr/resourcefork restoration; original opaque metadata remains in the archive for later macOS recovery.
+Recovery does not require Venice, a browser, Node or a search/index service. Select the recovery-tool digest from the requested tree's `recoveryTools` field; current delta trees require their own pinned reader, not an older baseline reader. On a non-macOS host, use `--portable`: restored bytes/POSIX modes/times do not constitute native ACL/xattr/resourcefork restoration; original opaque metadata remains in the archive for later macOS recovery.
 
 ## Metadata proof and macOS caveat
 
@@ -40,6 +44,8 @@ macOS also regenerates the eight-byte ID in its eleven-byte `com.apple.provenanc
 Catalog, media/file/download routes, HEAD/ranges, sidecar normalisation, capture verification and materialisation resolve published logical paths. Old legacy IDs can fall back to their original index associations; display names and MIME come from the logical origin, not an extensionless object filename. Arbitrary `raw-store`/`asset-store` paths, symlinks and traversal are blocked from media routes.
 
 Finder/reveal creates an explicit independent working copy outside the archive rather than exposing an editable canonical object. Existing filesystem-only consumers/static viewers must use a **restored working view**; logical paths are not promised to exist as physical files in the consolidated root. Include the shared pool, trees, receipts and tools when transferring the archive. The earlier duplication auditor measures physical layout; its missing-path check is not a logical-store verification after migration—use the reference-aware verify/restore commands.
+
+Asset restore reconstructs the selected asset paths and directories, not source JSON/JSONL containers, indexes or a bundled viewer. Retain/copy those corresponding non-asset files separately when assembling an explicit filesystem working view. This is not a one-command static-viewer export or an independent backup.
 
 ## Opt-in incremental maintenance
 

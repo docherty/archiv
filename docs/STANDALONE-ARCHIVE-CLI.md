@@ -43,20 +43,20 @@ To attempt the consistency-gated live mode while leaving Brave open:
 npm run archive -- sync --archive "/path/to/Venice Archive" --allow-running
 ```
 
-Raw snapshots live under `raw-snapshots/`. Controlled captures live under `captures/`. Each capture is normalized and indexed after acquisition. Search queries the newest captures first and then the imported human-readable repository, removing duplicate results.
+New raw history lives in `raw-store/objects/` with immutable dated path/metadata trees and checksum receipts. `raw-snapshots/` contains legacy copies, which are not automatically migrated or deleted. Controlled captures live under `captures/` and are normalized/indexed after acquisition. Search queries captures and the imported readable repository, removing duplicate results. See [preservation and recovery](archive-preservation.md).
 
-### Optional managed cache for scheduled sync
+### Managed working cache
 
-For a cloud-synced archive, keep raw browser working copies in a separate private local folder:
+Normal CLI/library sync keeps one managed working snapshot in the account's private cache outside the archive. Raw history is committed before decoding. Override its location or retention explicitly:
 
 ```sh
 npm run archive -- sync --archive "/path/to/Venice Archive" --allow-running \
-  --snapshot-directory "/private/local/venice-snapshots" --snapshot-retain 2 --require-clone
+  --snapshot-directory "/private/local/venice-snapshots" --snapshot-retain 1 --require-clone
 ```
 
-This opt-in mode requires at least five GiB of free disk space before copying. macOS uses native `cp -c` clones: Node's best-effort FICLONE option silently makes full copies there. `--require-clone` refuses a full-copy fallback. Cache permissions are owner-only; paths overlapping the live browser data are rejected, including symlink aliases. A live journal rotation is reconciled, never accepted as a complete snapshot without a quiet matching inventory.
+The managed cache requires at least five GiB of free disk space before copying. macOS uses native `cp -c` clones: Node's best-effort FICLONE option silently makes full copies there. `--require-clone` refuses a full-copy fallback. Cache permissions are owner-only; paths overlapping the live browser data are rejected, including symlink aliases. A live journal rotation is reconciled, never accepted as a complete snapshot without a quiet matching inventory.
 
-Only explicitly managed, stable raw copies with a successful capture receipt are pruned, and only after successful extraction/verification and checkpointing. Two captured copies remain; incomplete or stable-but-not-yet-captured recovery copies are preserved. Historical `raw-snapshots/`, captures and media are untouched. To retry extraction from this cache, use `extract --snapshot "/full/path/to/snapshot-..."`; `latest` still refers to the archive's traditional raw directory. Default CLI/library archive layout is unchanged.
+Superseded stable managed working copies are removed only through checksum-verified raw-history persistence; their historical bytes and metadata remain in the store. The default retained working count is one. Incomplete or unpreserved sources stay available for recovery. Historical `raw-snapshots/` are not automatically pruned. `snapshot` persists raw history and removes its working reconstruction; `extract --snapshot latest` uses a legacy snapshot when present, otherwise reconstructs the latest complete archived raw source. Use an explicit path to retry a particular retained working snapshot.
 
 A failed copy is removed with bounded retries. If cleanup itself fails (e.g. synced metadata recreates a directory), the original capture error is retained alongside the cleanup warning rather than replaced by `ENOTEMPTY`. Extraction setup failures also clean their disposable browser workspace.
 
@@ -69,6 +69,19 @@ The normal ongoing workflow is therefore:
 3. Open **Sync archive** and choose **Fetch new content** whenever you want to bring the local archive up to date. Avoid using Venice until it completes. Background browser bookkeeping is reconciled in short passes; continuous storage changes still reject the sync instead of accepting an inconsistent backup.
 
 After changing the service code, stop the running process and start it again; the interface and API are served by that process.
+
+### Opt-in shared assets and maintenance
+
+Existing standalone media/OPFS files are not silently converted. Stop any running library process and follow the [shared asset migration and restore-proof procedure](shared-asset-store.md) before enabling maintenance. After conversion, media paths are logical references into the existing raw byte pool; direct filesystem/static-viewer consumers need an explicit restored working view. Do not combine legacy extension diff packages with a consolidated root without first restoring/validating the intended working layout.
+
+```sh
+# Read-only preview of previously processed embedded-media stores:
+npm run archive -- materialize-media --archive /path/to/archive --reprocess --dry-run
+# Enable only after an explicitly approved prepare/proof/remove baseline:
+npm run assets -- --archive /path/to/archive maintain --enable
+```
+
+Enabled maintenance runs on sync (including no-op checks), materialisation and library startup. New payloads get separate native delta restore proofs before individual unlink; unchanged checks publish no new metadata generation. Pending/deadline/oversized-file failures remain visible and retain originals. See the linked guide for limits, retry and checkpoint requirements. Python 3.9+ on POSIX is required; Windows capture/restore needs a backend port.
 
 ## Safety properties
 

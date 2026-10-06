@@ -5,7 +5,7 @@ Archiv is a personal, local-first project. It is designed to reduce the risk of 
 ## Security model
 
 - The app reads a stability-checked copy of a Brave or Chrome profile. It does not write to the live profile or restore data into Venice.
-- The library listens only on a loopback address. It rejects non-local `Host` headers, cross-site state-changing requests and file paths that resolve outside the archive.
+- The library listens only on a loopback address. It rejects non-local `Host` headers, cross-site state-changing requests and arbitrary file paths outside the archive. Shared-store objects are read only through validated logical asset references; raw-store/asset-store control files are not downloadable media. Reveal actions create independent working copies rather than opening canonical objects for editing.
 - Browser extraction runs in a temporary isolated clone. It opens `https://venice.ai/` so that Venice's own browser code can access the copied origin storage, then removes the temporary workspace.
 - The extension is optional. Its restore and storage-write paths remain disabled.
 
@@ -20,6 +20,8 @@ An archive can contain private conversations, uploads, generated media and lossl
 - understand the retention and sharing settings of cloud-synced folders;
 - do not attach an archive, snapshot, capture or diagnostic dump to a public issue;
 - revoke Venice sessions and credentials if an archive is exposed.
+
+The deduplicated raw object pool may serve many historical versions. Corruption or deletion of a shared object can damage all referencing versions; do not edit canonical objects or prune the pool manually. Trees and native metadata also contain sensitive original paths and attributes. Keep the whole archive private and test restoration from a separate backup. Deduplication and an APFS clone do not provide encryption or a second failure domain.
 
 The optional extension keeps detected Venice recovery keys in its extension-local browser storage. They are not placed in Chrome Sync, but anyone who can read the browser profile or control the extension context should be treated as able to access them.
 

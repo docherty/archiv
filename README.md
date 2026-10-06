@@ -63,8 +63,8 @@ Archiv currently understands two browsers. “Supported” here means it knows t
 
 | Browser | Status | Notes |
 | --- | --- | --- |
-| **Brave** | Recommended | The main development target. Tested end to end on macOS. Windows and Linux discovery paths are included but need more field testing (let me know if you get it working). |
-| **Google Chrome** | Supported | Select it with `--browser chrome`. It uses the same extraction pipeline, with profile and executable paths for macOS, Windows and Linux, but has had less real-world testing. |
+| **Brave** | Recommended | The main development target. Tested end to end on macOS. Linux paths need more field testing. Windows discovery paths exist, but the current raw-store backend requires POSIX and does not support Windows capture/restore. |
+| **Google Chrome** | Supported | Select it with `--browser chrome`. It uses the same extraction pipeline, with macOS/Linux profile and executable paths, but has had less real-world testing. Windows discovery does not imply storage-backend support. |
 | Edge, Vivaldi, Opera and stock Chromium | Not currently supported | They share useful Chromium plumbing, but their paths, profile behaviour and locking have not been verified. Adding one should not require a new archive format. |
 | Firefox and Safari | Not supported | Their storage and automation models are different enough that they need separate importers. |
 
@@ -77,11 +77,11 @@ Brave is the browser Archiv is built around—and, obviously, **the browser you 
 ### Requirements
 
 - Git and [Node.js](https://nodejs.org/) 18 or newer
-- Python 3.9+ for lossless raw history (macOS/Linux; Windows raw-store tooling needs a port)
+- POSIX Python 3.9+ for raw history and asset maintenance; Windows capture/restore is not supported by this storage backend
 - A Brave or Chrome profile containing Venice data
 - Enough free disk space for a temporary safety copy of the browser data and the resulting archive
 
-macOS is tested end to end. Browser discovery includes Windows and Linux paths, but those platforms still need more real-world testing.
+macOS is tested end to end. Linux support needs more real-world testing; native macOS ACL/xattr/resource-fork recovery is not provided by a portable restore. Windows capture/restore needs a storage-backend port.
 
 ```bash
 git clone https://github.com/docherty/archiv.git
@@ -164,6 +164,7 @@ The archive is ordinary, inspectable data:
 ```text
 captures/           verified extracted captures
 raw-store/          deduplicated raw bytes, every dated tree and recovery metadata
+asset-store/        optional logical asset paths, per-origin metadata and recovery tools
 raw-snapshots/      legacy copies (migrate explicitly; never latest-only prune)
 indexes/            searchable conversation, message and media indexes
 media/              files imported from older archive packages, when present
@@ -173,15 +174,20 @@ recovered-content/  separately recovered conversations and Venice media
 .venice-archive/    source configuration, local preferences and update history
 ```
 
-Check the archive without loading it all into memory:
+Check CLI captures and raw history separately. For an imported extension package, also run the streaming package verifier:
 
 ```bash
+npm run archive -- verify-capture --archive /absolute/path/to/archive
+npm run archive -- verify-history --archive /absolute/path/to/archive
+# Imported extension packages, when present:
 npm run verify:archive -- /absolute/path/to/archive
 ```
 
-Read the [preservation and recovery design](docs/archive-preservation.md): raw history stores identical bytes once, retains every version, and remains independent of Global Memory. Search/index exports are rebuildable views. New syncs keep one private working clone, not a growing pile of full browser backups.
+Read the [preservation and recovery design](docs/archive-preservation.md): raw history stores identical bytes once, retains every version, and can be verified or restored without the browser, search index or other consumers. Search/index exports are rebuildable views. New syncs keep one private working clone, not a growing pile of full browser backups.
 
 For consolidated standalone media, see the [shared asset store and independent working-view recovery](docs/shared-asset-store.md). Historical paths resolve through the library; filesystem-only consumers must restore an explicit working view.
+
+Consolidation is opt-in: stop running Archiv services, follow the prepare/verify/restore-proof procedure, then explicitly remove standalone copies and enable bounded maintenance. Source JSON/JSONL containers and historical raw versions are not pruned. The [changelog](CHANGELOG.md) summarizes storage and compatibility changes.
 
 If you have older Venice downloads, audit them before importing anything:
 

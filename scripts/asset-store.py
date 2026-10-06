@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Lossless standalone asset references into the existing raw SHA-256 pool.
 
-Prepare/verify/proof are nondestructive. Only remove, after a verified restore proof,
-may unlink recorded asset files. Source JSON/JSONL and original indexes stay put.
+Prepare/verify/proof preserve original asset files. Explicit remove requires a
+matching full native restore proof; opt-in maintain may unlink recorded files only
+after each batch's native delta proof. Source JSON/JSONL and original indexes stay put.
 No hard links, alternate byte pool, object GC or network/browser dependencies.
 POSIX Python 3.9+; macOS extended metadata uses the existing raw-store serializer.
 """

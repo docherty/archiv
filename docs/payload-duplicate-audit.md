@@ -10,6 +10,8 @@ It is published owner-private (0600); it contains sensitive paths and must not b
 committed, uploaded, or treated as a public diagnostic. Source files, indexes,
 verification documents and raw objects are never rewritten by this command.
 
+This audits the **physical layout**, not the logical asset store after consolidation. Missing original paths can be expected in a consolidated archive, so its `complete` flag is not the migration integrity gate. Use the [shared-store verification and restore-proof commands](shared-asset-store.md) instead.
+
 ## What it measures
 
 - Full SHA-256 and size of every regular file in captures, imported/media layers,
