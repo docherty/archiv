@@ -149,9 +149,11 @@ need the original host/keychain; readable extracted records and media reduce tha
 risk. Older data already absent before this migration cannot be recreated by dedup.
 
 Existing decoded media/capture copies have not been deleted or globally reorganized.
-A future exact-byte inventory can identify duplication there and introduce one
-canonical asset store with explicit references/compatible readers. Do not infer
-that same message IDs, filenames or lower-resolution previews mean identical media.
+A read-only exact-byte inventory is available: see [payload-duplicate-audit.md](payload-duplicate-audit.md).
+Use independently verified overlap with the existing raw byte pool when designing
+canonical asset references and compatible readers; do not create a second permanent
+copy of bytes already preserved. An audit is not a removal receipt or authorization.
+Never infer identity from message IDs, filenames, sampled edges or lower-resolution previews.
 Chunks inside changing LevelDB files may still repeat: whole-file SHA dedup does not
 pretend to be record/chunk-level dedup. Add such optimization only with separately
 verified reconstruction and a demonstrated need, not a lossy latest-only shortcut.

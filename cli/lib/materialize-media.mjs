@@ -222,13 +222,20 @@ export async function materializeEmbeddedMedia(archiveDirectory, { apply = true,
       const encodedLength = payloadLength(payload);
       const encodedEdgeSha256 = payloadEdgeFingerprint(payload);
       const previous = bySourceRecord.get(sourceRecordKey);
-      if (previous && previous.encodedLength === encodedLength && previous.encodedEdgeSha256 === encodedEdgeSha256) return;
+      // Length/edge samples are diagnostics, not identity. Middle-byte edits and
+      // encoded view offsets can change originals while those samples stay equal.
       const decoded = decodeBinaryPayload(payload);
       if (!decoded?.length) return;
       const inspected = inspectMedia(decoded, raw.fileName || raw.filename || raw.name || '', raw.mimeType || raw.mime_type || raw.contentType || raw.content_type || '');
       if (inspected.mimeType === 'application/octet-stream') return;
       const sha256 = createHash('sha256').update(decoded).digest('hex');
       const relative = ['media', 'sha256', sha256.slice(0, 2), `${sha256}${inspected.extension}`].join('/');
+      if (previous?.sha256 === sha256) {
+        // Same decoded bytes need no new version; also repair a missing/corrupt
+        // materialized object from this captured source before trusting the reuse.
+        if (apply) await writeContentAddressed(layerRoot, relative, decoded, sha256);
+        return;
+      }
       if (apply) await writeContentAddressed(layerRoot, relative, decoded, sha256);
       const messageId = String(raw.messageId || raw.message_id || sourceRecordId);
       const linked = messages.get(messageId);

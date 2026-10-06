@@ -28,6 +28,7 @@
     "check:release": "node tests/release-checks.mjs",
     "check:local-artifact": "node tests/local-artifact-regression.mjs",
     "audit:recovery": "node scripts/audit-missing-media.mjs",
+    "audit:duplicates": "python3 scripts/audit-payload-duplicates.py",
     "recover:legacy": "node scripts/recover-legacy-content.mjs",
     "repair:media": "node cli/venice-archive.mjs materialize-media",
     "verify:archive": "node scripts/verify-archive.mjs"
