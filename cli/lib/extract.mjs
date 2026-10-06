@@ -112,11 +112,30 @@ async function cloneUserData(source, target, requireClone = false) {
   await cp(source, target, { recursive: true, preserveTimestamps: true, mode: requireClone ? fsConstants.COPYFILE_FICLONE_FORCE : fsConstants.COPYFILE_FICLONE });
 }
 
-function commandExpression(type, data = {}) {
+export function commandExpression(type, data = {}, timeoutMs = 180000) {
   const requestId = `cli-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const toPage = `venice-sync-to-page:${PROTOCOL}`;
   const fromPage = `venice-sync-from-page:${PROTOCOL}`;
-  return `(async()=>await new Promise((resolve,reject)=>{const id=${JSON.stringify(requestId)};const timer=setTimeout(()=>reject(new Error('Venice command timed out: ${type}')),180000);const handler=(event)=>{if(event.detail&&event.detail.requestId===id){clearTimeout(timer);window.removeEventListener(${JSON.stringify(fromPage)},handler);event.detail.error?reject(new Error(event.detail.error)):resolve(event.detail.response);}};window.addEventListener(${JSON.stringify(fromPage)},handler);window.dispatchEvent(new CustomEvent(${JSON.stringify(toPage)},{detail:{type:${JSON.stringify(type)},requestId:id,...${JSON.stringify(data)}}}));}))()`;
+  return `(async()=>await new Promise((resolve,reject)=>{
+    const id=${JSON.stringify(requestId)};
+    const responseEvent=${JSON.stringify(fromPage)};
+    const progressEvent=${JSON.stringify(`venice-sync-progress:${PROTOCOL}`)};
+    let lastStage='';
+    const progress=(event)=>{
+      const detail=event.detail||{};
+      lastStage=[detail.phase,detail.source,detail.storeName].filter(value=>typeof value==='string').map(value=>value.slice(0,160)).join('/');
+    };
+    const cleanup=()=>{clearTimeout(timer);window.removeEventListener(responseEvent,handler);window.removeEventListener(progressEvent,progress);};
+    const handler=(event)=>{
+      if(event.detail?.requestId!==id)return;
+      cleanup();
+      event.detail.error?reject(new Error(event.detail.error)):resolve(event.detail.response);
+    };
+    const timer=setTimeout(()=>{cleanup();reject(new Error(${JSON.stringify(`Venice command timed out: ${type}`)}+(lastStage?' (last stage: '+lastStage+')':'')));},${Number(timeoutMs)});
+    window.addEventListener(responseEvent,handler);
+    window.addEventListener(progressEvent,progress);
+    window.dispatchEvent(new CustomEvent(${JSON.stringify(toPage)},{detail:{type:${JSON.stringify(type)},requestId:id,...${JSON.stringify(data)}}}));
+  }))()`;
 }
 
 async function pageCommand(client, type, data = {}) {
@@ -233,6 +252,20 @@ export async function extractSnapshot({ snapshotRoot, archiveDirectory, browser,
     const mainSource = await readFile(path.join(projectRoot, 'extension/content-main.js'), 'utf8');
     await client.evaluate(naclSource, { awaitPromise: false });
     await client.evaluate(mainSource, { awaitPromise: false });
+    await client.call('Runtime.addBinding', { name: 'archivInventoryProgress' });
+    client.socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.method !== 'Runtime.bindingCalled' || message.params?.name !== 'archivInventoryProgress') return;
+      try {
+        const progress = JSON.parse(message.params.payload);
+        if (progress.phase === 'inventory' || progress.phase === 'decrypt') {
+          onProgress(`Snapshot summary: ${progress.phase}`);
+        } else if (progress.phase === 'complete' && progress.elapsedMs >= 1000) {
+          onProgress(`Inventory ${String(progress.source).slice(0, 40)}/${String(progress.storeName).slice(0, 160)}: ${progress.records} records checked in ${progress.elapsedMs}ms`);
+        }
+      } catch { /* malformed diagnostic events must not affect capture integrity */ }
+    });
+    await client.evaluate(`window.addEventListener('venice-sync-progress:${PROTOCOL}', event => window.archivInventoryProgress(JSON.stringify(event.detail)));`, { awaitPromise: false });
     const ping = await pageCommand(client, 'PING');
     if (ping.protocolVersion !== PROTOCOL) throw new Error(`Extractor protocol mismatch: ${ping.protocolVersion}`);
     const previous = await latestVerifiedCapture(archiveDirectory);

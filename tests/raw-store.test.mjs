@@ -5,6 +5,8 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, stat, symlink, chmod 
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { recordRawCaptureResult } from '../cli/lib/raw-store.mjs';
+import { markSnapshotCaptured } from '../cli/lib/snapshot-cache.mjs';
 
 const script = new URL('../scripts/raw-store.py', import.meta.url).pathname;
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -147,6 +149,30 @@ test('verified capture journal updates never mutate the pre-decoder raw tree', a
   assert.deepEqual(await readFile(treePath), before);
   run(store, 'ingest', '--source', source, '--remove-source');
   assert.equal(JSON.parse(await readFile(path.join(store, 'receipts', `${id}.json`))).capture.verified, true);
+}));
+
+test('an unchanged comparison never claims the prior capture decoded the new raw snapshot', async () => fixture(async (root) => {
+  const store = path.join(root, 'raw-store');
+  const first = 'snapshot-2026-01-01T00-00-00-000Z';
+  const second = 'snapshot-2026-01-02T00-00-00-000Z';
+  const source = await snapshot(root, second);
+  run(store, 'ingest', '--source', await snapshot(root, first));
+  run(store, 'ingest', '--source', source);
+  const captureId = 'capture-2026-01-01T00-00-01-000Z';
+  const folder = path.join(root, 'captures', captureId);
+  await mkdir(folder, { recursive: true });
+  await writeFile(path.join(folder, 'capture.manifest.json'), JSON.stringify({ snapshot: first }));
+  await writeFile(path.join(folder, 'capture.verification.json'), JSON.stringify({ ok: true }));
+  await recordRawCaptureResult(root, first, { captureId });
+  assert.throws(() => run(store, 'record-capture', '--snapshot', second, '--capture', captureId), /does not verify/);
+  await recordRawCaptureResult(root, second, { captureId, unchanged: true });
+  assert.equal(JSON.parse(await readFile(path.join(store, 'receipts', `${second}.json`))).capture, undefined);
+  await markSnapshotCaptured(source, captureId, { outsideSnapshot: true, comparisonOnly: true });
+  const comparison = JSON.parse(await readFile(path.join(root, '.capture-receipts', `${second}.json`)));
+  assert.equal(comparison.comparisonOnly, true);
+  assert.equal(comparison.captureId, captureId);
+  run(store, 'ingest', '--source', source, '--remove-source');
+  run(store, 'verify');
 }));
 
 test('system Python launchd compatibility supports real hashing, commit and restore', { skip: process.platform !== 'darwin' }, async () => fixture(async (root, store) => {

@@ -38,12 +38,12 @@ export async function cleanupFailedSnapshot(root, originalError, { remove = rm, 
   throw originalError;
 }
 
-export async function markSnapshotCaptured(snapshotRoot, captureId, { outsideSnapshot = false } = {}) {
+export async function markSnapshotCaptured(snapshotRoot, captureId, { outsideSnapshot = false, comparisonOnly = false } = {}) {
   if (!captureId || typeof captureId !== 'string') throw new Error('Missing verified capture identity.');
   const receipts = path.join(path.dirname(snapshotRoot), '.capture-receipts');
   if (outsideSnapshot) await mkdir(receipts, { recursive: true, mode: 0o700 });
   const destination = outsideSnapshot ? path.join(receipts, `${path.basename(snapshotRoot)}.json`) : path.join(snapshotRoot, 'capture.receipt.json');
-  await writeFile(destination, `${JSON.stringify({ verified: true, captureId, capturedAt: new Date().toISOString() })}\n`, { mode: 0o600 });
+  await writeFile(destination, `${JSON.stringify({ verified: true, captureId, comparisonOnly, capturedAt: new Date().toISOString() })}\n`, { mode: 0o600 });
 }
 
 export async function pruneSnapshotCache(directory, currentSnapshot, keep = 2, { archiveDirectory = null } = {}) {

@@ -34,6 +34,13 @@ export async function persistRawSnapshot(archive, source, { removeSource = false
   return runRawStore(archive, ['ingest', '--source', source, ...(removeSource ? ['--remove-source'] : []), ...(requireClone ? ['--require-clone'] : [])], onProgress);
 }
 
+export async function recordRawCaptureResult(archive, identity, result) {
+  // A successful no-op compares against a prior verified capture; it does not
+  // create a new decoded capture of this raw snapshot. Keep that distinction.
+  if (result.unchanged === true) return;
+  return runRawStore(archive, ['record-capture', '--snapshot', identity, '--capture', result.captureId]);
+}
+
 export async function retainFailedRawSnapshot(archive, source, originalError) {
   try {
     await persistRawSnapshot(archive, source, { removeSource: true });

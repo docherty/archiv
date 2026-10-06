@@ -212,23 +212,52 @@
     let h2 = 0x9e3779b9;
     const update = (serialized) => {
       const value = `${serialized}\u0000`;
+      // Keep the hot loop's accumulators local. Mutating captured closure state
+      // per character is much slower on multi-GiB stores. Bytes/format are unchanged.
+      let localH1 = h1;
+      let localH2 = h2;
       for (let index = 0; index < value.length; index += 1) {
         const code = value.charCodeAt(index);
-        h1 ^= code & 0xff;
-        h1 = Math.imul(h1, 0x01000193) >>> 0;
-        h1 ^= code >>> 8;
-        h1 = Math.imul(h1, 0x01000193) >>> 0;
-        h2 ^= (code + index) & 0xff;
-        h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
-        h2 ^= (code + index) >>> 8;
-        h2 = Math.imul(h2, 0xc2b2ae35) >>> 0;
+        localH1 ^= code & 0xff;
+        localH1 = Math.imul(localH1, 0x01000193) >>> 0;
+        localH1 ^= code >>> 8;
+        localH1 = Math.imul(localH1, 0x01000193) >>> 0;
+        localH2 ^= (code + index) & 0xff;
+        localH2 = Math.imul(localH2, 0x85ebca6b) >>> 0;
+        localH2 ^= (code + index) >>> 8;
+        localH2 = Math.imul(localH2, 0xc2b2ae35) >>> 0;
       }
+      h1 = localH1;
+      h2 = localH2;
     };
     for (const record of list) {
       const normalized = encodeRecord ? await encodeRecord(record) : record;
       update(JSON.stringify(normalized));
     }
     return `record-fnv-v1-${list.length}-${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`;
+  }
+
+  function reportInventoryProgress(phase, source, storeName, records, elapsedMs) {
+    // Metadata only: never include records, keys, titles, previews, or error payloads.
+    window.dispatchEvent(new CustomEvent(`venice-sync-progress:${MAIN_PROTOCOL_VERSION}`, {
+      detail: { phase, source, storeName, records, elapsedMs }
+    }));
+  }
+
+  async function inspectInventoryStore(source, storeName, read) {
+    const started = Date.now();
+    reportInventoryProgress('read', source, storeName, null, 0);
+    try {
+      const records = await read();
+      if (records === null) return { records, fingerprint: null };
+      reportInventoryProgress('fingerprint', source, storeName, records.length, Date.now() - started);
+      const fingerprint = await captureRecordSetFingerprint(records, encodeArchiveTransportValue);
+      reportInventoryProgress('complete', source, storeName, records.length, Date.now() - started);
+      return { records, fingerprint };
+    } catch (error) {
+      reportInventoryProgress('error', source, storeName, null, Date.now() - started);
+      throw error;
+    }
   }
 
   function captureRecordExists(db, hash) {
@@ -1420,16 +1449,7 @@
         return [];
       }
 
-      const raw = await new Promise((resolve, reject) => {
-        try {
-          const tx = db.transaction([storeName], 'readonly');
-          const request = tx.objectStore(storeName).getAll();
-          request.onsuccess = () => resolve(request.result || []);
-          request.onerror = () => reject(request.error);
-        } catch (error) {
-          reject(error);
-        }
-      });
+      const raw = await readAllFromOpenStore(db, storeName);
 
       const out = [];
       for (const record of raw) {
@@ -1566,7 +1586,8 @@
     for (const descriptor of descriptors) {
       const logicalName = getRxLogicalStoreName(descriptor.base);
       try {
-        const records = keyBytes ? await readRxStore(descriptor.base, keyBytes) : null;
+        const { records, fingerprint } = await inspectInventoryStore('rxdb', logicalName,
+          () => keyBytes ? readRxStore(descriptor.base, keyBytes) : null);
         if (records === null) {
           continue; // RxDB unavailable — omit entirely
         }
@@ -1580,7 +1601,7 @@
           // running. Hash the decoded snapshot that backs all subsequent
           // paged reads; the closing inventory pass performs a fresh read and
           // the backup page rejects any changed fingerprint.
-          fingerprint: await captureRecordSetFingerprint(records, encodeArchiveTransportValue)
+          fingerprint
         });
         rxStoreReadCache.set(descriptor.base, {
           keyFingerprint: activeKeyFingerprint,
@@ -1619,13 +1640,7 @@
     if (!db) return null;
     try {
       if (!db.objectStoreNames.contains(physicalStoreName)) return [];
-      const raw = await new Promise((resolve, reject) => {
-        const tx = db.transaction([physicalStoreName], 'readonly');
-        const request = tx.objectStore(physicalStoreName).getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => reject(request.error || new Error(`Could not read RxDB physical store ${physicalStoreName}.`));
-      });
-      return raw;
+      return await readAllFromOpenStore(db, physicalStoreName);
     } finally {
       try { db.close(); } catch (_) { /* ignore */ }
     }
@@ -1647,7 +1662,8 @@
     for (const physicalStoreName of physicalStoreNames) {
       const logicalName = getRxPhysicalLogicalStoreName(physicalStoreName);
       try {
-        const records = await readRxPhysicalStore(physicalStoreName);
+        const { records, fingerprint } = await inspectInventoryStore('rxdb-physical', logicalName,
+          () => readRxPhysicalStore(physicalStoreName));
         if (records === null) continue;
         inventory.push({
           name: logicalName,
@@ -1657,7 +1673,7 @@
           databaseName: RX_DB_NAME,
           physicalStoreName,
           schemaVersion: databaseVersion,
-          fingerprint: await captureRecordSetFingerprint(records, encodeArchiveTransportValue)
+          fingerprint
         });
         rxPhysicalStoreReadCache.set(physicalStoreName, { databaseVersion, records });
       } catch (error) {
@@ -1869,12 +1885,7 @@
     if (!db) return null;
     try {
       if (!db.objectStoreNames.contains(storeName)) return [];
-      const raw = await new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], 'readonly');
-        const request = tx.objectStore(storeName).getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => reject(request.error || new Error(`Could not read ${databaseName}/${storeName}.`));
-      });
+      const raw = await readAllFromOpenStore(db, storeName);
       return raw.map((record) => keyBytes ? decryptRecord(record, keyBytes) : record);
     } finally {
       try { db.close(); } catch (_) { /* ignore */ }
@@ -1906,7 +1917,8 @@
         const logicalName = getGenericIdbLogicalStoreName(database.name, storeName);
         const cacheKey = genericIdbCacheKey(database.name, storeName);
         try {
-          const records = await readGenericIdbStore(database.name, storeName, keyBytes);
+          const { records, fingerprint } = await inspectInventoryStore('indexedDB', logicalName,
+            () => readGenericIdbStore(database.name, storeName, keyBytes));
           if (records === null) continue;
           inventory.push({
             name: logicalName,
@@ -1915,7 +1927,7 @@
             databaseName: database.name,
             physicalStoreName: storeName,
             schemaVersion,
-          fingerprint: await captureRecordSetFingerprint(records, encodeArchiveTransportValue)
+            fingerprint
           });
           genericIdbStoreReadCache.set(cacheKey, { keyFingerprint: activeKeyFingerprint, records });
         } catch (error) {
@@ -1997,13 +2009,26 @@
 
   function readAllFromOpenStore(db, storeName) {
     return new Promise((resolve, reject) => {
+      let tx;
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback(value);
+      };
+      const timer = setTimeout(() => {
+        finish(reject, new Error(`IndexedDB read timed out after 30s: ${db.name}/${storeName}`));
+        try { tx?.abort(); } catch (_) { /* already finished */ }
+      }, 30000);
       try {
-        const tx = db.transaction([storeName], 'readonly');
+        tx = db.transaction([storeName], 'readonly');
         const request = tx.objectStore(storeName).getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => reject(request.error || new Error(`Failed to read ${storeName}.`));
+        request.onsuccess = () => finish(resolve, request.result || []);
+        request.onerror = () => finish(reject, request.error || new Error(`Failed to read ${storeName}.`));
+        tx.onabort = tx.onerror = () => finish(reject, tx.error || new Error(`Read aborted: ${storeName}.`));
       } catch (error) {
-        reject(error);
+        finish(reject, error);
       }
     });
   }
@@ -2142,7 +2167,8 @@
 
       for (const storeName of storeNames) {
         try {
-          const records = await readAllFromOpenStore(db, storeName);
+          const { records, fingerprint } = await inspectInventoryStore('legacy', storeName,
+            () => readAllFromOpenStore(db, storeName));
           inventory.push({
             name: storeName,
             count: records.length,
@@ -2150,7 +2176,7 @@
             databaseName: DB_NAME,
             physicalStoreName: storeName,
             schemaVersion: db.version,
-            fingerprint: await captureRecordSetFingerprint(records, encodeArchiveTransportValue)
+            fingerprint
           });
           legacyStoreReadCache.set(storeName, { dbVersion: db.version, records });
         } catch (error) {
@@ -2262,6 +2288,11 @@
   }
 
   async function scanStoreRecords(storeName, onRecord) {
+    const cached = legacyStoreReadCache.get(storeName);
+    if (cached) {
+      for (const record of cached.records) onRecord(record);
+      return;
+    }
     const db = await openDB();
 
     return new Promise((resolve, reject) => {
@@ -2336,7 +2367,7 @@
   }
 
   async function buildLightweightSnapshotSummary(key, storeInventory) {
-    const conversationsRaw = await getAllFromStore('conversations');
+    const conversationsRaw = legacyStoreReadCache.get('conversations')?.records || await getAllFromStore('conversations');
     const conversations = decryptRecords(conversationsRaw, key.keyBytes);
     const conversationIds = new Set(conversations.map((conversation) => conversation.id));
     const messageCountByConversation = new Map();
@@ -2827,11 +2858,12 @@
     }
 
     try {
-      const inventoryResponse = await getStoreInventoryResponse().catch((error) => {
-        console.warn(LOG_PREFIX, 'Could not inspect store inventory:', error.message);
-        return { storeInventory: [] };
-      });
+      reportInventoryProgress('inventory', 'summary', null, null, 0);
+      const inventoryResponse = await getStoreInventoryResponse();
       const storeInventory = inventoryResponse.storeInventory || [];
+      const unreadable = storeInventory.find((store) => store.error || !Number.isInteger(store.count));
+      if (unreadable) throw new Error(`Snapshot inventory is incomplete: ${unreadable.name}: ${unreadable.error || 'invalid record count'}`);
+      reportInventoryProgress('decrypt', 'summary', null, storeInventory.length, 0);
       const summary = await buildLightweightSnapshotSummary(key, storeInventory);
 
       const countFor = (name) => {

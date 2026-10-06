@@ -13,7 +13,7 @@ import { startArchiveService } from './lib/service.mjs';
 import { verifyCapture } from './lib/verify-capture.mjs';
 import { formatBytes, parseArgs, pathExists } from './lib/util.mjs';
 import { markSnapshotCaptured, pruneSnapshotCache } from './lib/snapshot-cache.mjs';
-import { defaultSnapshotCache, persistRawSnapshot, retainFailedRawSnapshot, withRawSnapshot, latestArchivedSnapshot, runRawStore } from './lib/raw-store.mjs';
+import { defaultSnapshotCache, persistRawSnapshot, recordRawCaptureResult, retainFailedRawSnapshot, withRawSnapshot, latestArchivedSnapshot, runRawStore } from './lib/raw-store.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -172,10 +172,10 @@ async function syncArchive(setup, { allowRunning = false, snapshotDirectory = de
   let result;
   try { result = await completeExtraction(setup, snapshot.snapshotRoot, emit, checkpoint.changes); }
   catch (error) { return retainFailedRawSnapshot(setup.archiveDirectory, snapshot.snapshotRoot, error); }
-  await runRawStore(setup.archiveDirectory, ['record-capture', '--snapshot', snapshot.manifest.snapshotId, '--capture', result.captureId]);
+  await recordRawCaptureResult(setup.archiveDirectory, snapshot.manifest.snapshotId, result);
   // Operational receipts live outside the immutable raw tree, so successful
   // decoding doesn't require a second full metadata tree or any duplicate bytes.
-  await markSnapshotCaptured(snapshot.snapshotRoot, result.captureId, { outsideSnapshot: true });
+  await markSnapshotCaptured(snapshot.snapshotRoot, result.captureId, { outsideSnapshot: true, comparisonOnly: result.unchanged === true });
   await saveSourceCheckpoint({ ...setup, snapshotManifest: snapshot.manifest, captureId: result.captureId });
   if (snapshotDirectory) {
     try {

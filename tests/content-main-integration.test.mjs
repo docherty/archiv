@@ -58,7 +58,7 @@ function makeRequest(result) {
   return request;
 }
 
-function makeFakeIndexedDb(databases) {
+function makeFakeIndexedDb(databases, options = {}) {
   const descriptors = Object.entries(databases).map(([name, data]) => ({
     name,
     version: data.version || 1
@@ -75,9 +75,19 @@ function makeFakeIndexedDb(databases) {
       close() {},
       transaction(names) {
         return {
+          abort() { options.onAbort?.(name, names[0]); },
           objectStore(storeName) {
             return {
-              getAll: () => makeRequest(data.stores[storeName] || [])
+              getAll() {
+                options.onRead?.(name, storeName);
+                if (options.hungStore === `${name}/${storeName}`) return {};
+                if (options.failStore === `${name}/${storeName}`) {
+                  const request = { error: new Error('Injected read failure') };
+                  setTimeout(() => request.onerror?.(), 0);
+                  return request;
+                }
+                return makeRequest(data.stores[storeName] || []);
+              }
             };
           }
         };
@@ -104,7 +114,7 @@ function makeFakeIndexedDb(databases) {
   };
 }
 
-async function createRuntime() {
+async function createRuntime(options = {}) {
   const window = new FakeWindow();
   const document = {
     readyState: 'loading',
@@ -148,7 +158,7 @@ async function createRuntime() {
     document,
     location: window.location,
     CustomEvent: FakeCustomEvent,
-    indexedDB: makeFakeIndexedDb(databases),
+    indexedDB: makeFakeIndexedDb(databases, options),
     localStorage: makeStorage({ encryptionKey: Array.from({ length: 32 }, (_, index) => index).join(',') }),
     sessionStorage: makeStorage({ draft: 'recoverable' }),
     navigator: { storage: {} },
@@ -165,7 +175,7 @@ async function createRuntime() {
     URL,
     atob,
     btoa,
-    setTimeout,
+    setTimeout: (callback, delay) => setTimeout(callback, options.fastDeadlines && delay === 30000 ? 10 : delay),
     clearTimeout,
     console
   };
@@ -235,4 +245,49 @@ test('content-main inventories and pages legacy, RxDB physical, Studio, and futu
   });
   assert.equal(rawAttachment.success, true);
   assert.equal(rawAttachment.records[0].docIdWithAttachmentId, 'rx-m1|file-1');
+});
+
+test('summary reuses inventoried legacy records and reports metadata-only progress', async () => {
+  const reads = [];
+  const { window } = await createRuntime({ onRead: (database, store) => reads.push(`${database}/${store}`) });
+  const progress = [];
+  window.addEventListener('venice-sync-progress:2026-07-store-api-v12-tab-handoff', event => progress.push(event.detail));
+  const result = await dispatchCommand(window, 'GET_SNAPSHOT_SUMMARY');
+  assert.equal(result.success, true);
+  assert.equal(reads.filter(name => name === 'venice-db-encrypted/messages').length, 1);
+  assert.equal(reads.filter(name => name === 'venice-db-encrypted/conversations').length, 1);
+  assert.ok(result.diagnostics.storeInventory.some(store => store.name === 'idb:future-content-db:savedDrafts'));
+  assert.ok(progress.some(item => item.phase === 'fingerprint' && item.storeName === 'messages'));
+  assert.ok(progress.some(item => item.phase === 'decrypt'));
+  for (const item of progress) {
+    assert.deepEqual(Object.keys(item).sort(), ['elapsedMs', 'phase', 'records', 'source', 'storeName']);
+  }
+  assert.doesNotMatch(JSON.stringify(progress), /legacy-c1|draft-1|recoverable|0,1,2,3/);
+});
+
+test('summary fails closed when an unknown future store is unreadable', async () => {
+  const { window } = await createRuntime({ failStore: 'future-content-db/savedDrafts' });
+  const result = await dispatchCommand(window, 'GET_SNAPSHOT_SUMMARY');
+  assert.equal(result.success, false);
+  assert.match(result.error, /inventory is incomplete: idb:future-content-db:savedDrafts/);
+  assert.equal(result.summary, undefined);
+});
+
+test('a hung IndexedDB read is bounded and its readonly transaction is aborted', async () => {
+  const aborted = [];
+  const { window } = await createRuntime({ hungStore: 'future-content-db/savedDrafts', fastDeadlines: true,
+    onAbort: (database, store) => aborted.push(`${database}/${store}`) });
+  const result = await dispatchCommand(window, 'GET_STORE_INVENTORY');
+  const store = result.storeInventory.find(item => item.name === 'idb:future-content-db:savedDrafts');
+  assert.match(store.error, /read timed out after 30s/);
+  assert.equal(store.count, null);
+  assert.ok(aborted.includes('future-content-db/savedDrafts'));
+});
+
+test('summary does not swallow a failed whole-origin inventory', async () => {
+  const { window, context } = await createRuntime();
+  context.indexedDB.databases = async () => { throw new Error('Enumeration unavailable'); };
+  const result = await dispatchCommand(window, 'GET_SNAPSHOT_SUMMARY');
+  assert.equal(result.success, false);
+  assert.match(result.error, /Enumeration unavailable/);
 });
